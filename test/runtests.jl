@@ -1,6 +1,6 @@
-using NodivEnvironmentalSpace
+using Nodiv
 using Test
 
-@testset "NodivEnvironmentalSpace.jl" begin
+@testset "Nodiv.jl" begin
     # Write your tests here.
 end
