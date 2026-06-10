@@ -11,7 +11,7 @@ using Phylo
 using RecipesBase
 using Random: rand!
 using Statistics
-using StatsBase: tiedrank
+using StatsBase: tiedrank, sample
 using ProgressLogging
 
 # All tips/species descending from a node.
@@ -53,15 +53,36 @@ get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree,
     end
 end
 
-# Build a sampling distribution of a descendant clade's richness via curveball randomization.
-function simulate_descendants(clade, tree, descendant; nsims = 99)
-    rmg = matrixrandomizer(clade)
+# Build a sampling distribution of a descendant clade's per-site richness.
+#
+# :swap       - curveball randomization of the clade's presence/absence matrix
+#               (keeps species ranges and site richness constant), then recompute
+#               the descendant's richness. The published null model.
+# :tipshuffle - keep the presence/absence matrix intact and randomize only which
+#               species belong to the focal descendant, holding the descendant's
+#               species count fixed. Much faster, as it avoids matrix swapping.
+function simulate_descendants(clade, tree, descendant; method = :swap, nsims = 99)
     ret = zeros(nsims + 1, nsites(clade))  # a matrix to hold the richness values from the simulations
     # the empirical richness in the first row
     ret[1, :] = richness(get_clade(clade, tree, descendant))
-    for i in 2:nsims + 1
-        # and simulated richness in the rest of the nsims rows
-        ret[i, :] .= richness(get_clade(rand!(rmg), tree, descendant))
+    if method == :swap
+        rmg = matrixrandomizer(clade)
+        for i in 2:nsims + 1
+            # and simulated richness in the rest of the nsims rows
+            ret[i, :] .= richness(get_clade(rand!(rmg), tree, descendant))
+        end
+    elseif method == :tipshuffle
+        # Materialize the clade once so the per-sim views are single-level (a
+        # nested view of a view would not hit SpatialEcology's colsum method).
+        cl = Assemblage(clade)
+        nclade = nspecies(cl)
+        ndesc = nspecies(get_clade(cl, tree, descendant))
+        for i in 2:nsims + 1
+            # draw a random set of `ndesc` species and take their per-site richness
+            ret[i, :] .= richness(view(cl, species = sample(1:nclade, ndesc; replace = false)))
+        end
+    else
+        error("unrecognized method")
     end
     ret
 end
@@ -87,7 +108,7 @@ function calculate_GND(sims)
 end
 
 # Calculate SOS and GND for a single node (NaN when the node can't be analysed).
-function process_node(assemblage, tree, nodename; nsims = 100)
+function process_node(assemblage, tree, nodename; nsims = 100, method = :swap)
     clade = get_clade(assemblage, tree, nodename)
     children = getchildren(tree, nodename)
 
@@ -95,19 +116,32 @@ function process_node(assemblage, tree, nodename; nsims = 100)
         return (fill(NaN, nsites(clade)), NaN)
     end
 
-    sims = simulate_descendants(clade, tree, children[1]; nsims)
+    sims = simulate_descendants(clade, tree, children[1]; nsims, method)
     calculate_SOS(sims), calculate_GND(sims)
 end
 
 # Run the node-based analysis over every internal node of the tree.
 # Recreates the main `Node_analysis` function of the nodiv R package
 # (https://github.com/mkborregaard/nodiv).
-function node_based_analysis(assemblage::Assemblage, tree::AbstractTree)
+function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100, method = :swap)
    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)] #shuffle!(collect(nodenamefilter(!isleaf, tree)))
    SOSs = Matrix{Float64}(undef, nsites(assemblage), length(nodevec))
    GNDs = Vector{Float64}(undef, length(nodevec))
    @progress for (i, node) in enumerate(nodevec)
-       SOSs[:,i], GNDs[i] = process_node(assemblage, tree, node)
+       SOSs[:,i], GNDs[i] = process_node(assemblage, tree, node; nsims, method)
    end
    SOSs, GNDs
+end
+
+# Calculate just the GND value for every internal node, returning the node names
+# alongside their GNDs. Lighter than `node_based_analysis`, which also builds the
+# per-cell SOS maps - use this for a fast divergence scan across the whole tree.
+# Defaults to the :tipshuffle null. Nodes that cannot be analysed get GND = NaN.
+function node_gnd(assemblage::Assemblage, tree::AbstractTree; nsims = 100, method = :tipshuffle)
+    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
+    GNDs = Vector{Float64}(undef, length(nodevec))
+    @progress for (i, node) in enumerate(nodevec)
+        GNDs[i] = process_node(assemblage, tree, node; nsims, method)[2]
+    end
+    nodevec, GNDs
 end
