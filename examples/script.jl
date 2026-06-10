@@ -101,7 +101,7 @@ plot(newcomm, title = "randomized version of $randnode")
 ch1, ch2 = getchildren(tree, randnode)[1:2]
 plot_node(newcomm, tree, randnode)
 
-sims = simulate_descendants(rand_clade, tree, ch1)
+sims = simulate_descendants(rand_clade, tree, ch1; method = :tipshuffle)
 SOS = calculate_SOS(sims)
 plot(SOS, rand_clade, clim = (-8,8), fillcolor = :RdYlBu, title = "SOS for clade $randnode")
 
@@ -111,7 +111,7 @@ first(GND, 4)
 ### Putting it all together
 
 # use as
-SOS, GND = process_node(birds, tree, randnode)
+SOS, GND = process_node(birds, tree, randnode; method = :tipshuffle)
 
 ### Calculate GND for all nodes
 
@@ -119,17 +119,17 @@ SOS, GND = process_node(birds, tree, randnode)
 # GND (no SOS maps), and defaults to the fast :tipshuffle null, so it runs over
 # the full bird tree in reasonable time. (`node_based_analysis(birds, tree;
 # method = :tipshuffle)` is still available if you also want the per-cell SOS maps.)
-nodes, GNDs = node_gnd(birds, tree)
+gnd = node_gnd(birds, tree)   # Dict(nodename => GND), defaults to :tipshuffle
 
 # the most divergent nodes
-valid = findall(!isnan, GNDs)
-ranked = valid[sortperm(GNDs[valid], rev = true)]
-[nodes[ranked] GNDs[ranked]][1:10, :]
+ranked = sort(filter(p -> !isnan(p.second), collect(gnd)), by = last, rev = true)
+first(ranked, 10)
 
-# map GND onto the tree
+# map GND onto the tree: Phylo's recipe accepts a Dict for marker_z and looks up
+# each node by name (nodes absent from the Dict, incl. tips, are left uncoloured)
 plot(tree,
-     showtips = false, marker_z = GNDs,
+     showtips = false, marker_z = gnd,
      color = cgrad(:YlOrRd, 10, categorical = true),
-     markersize = 15 .* GNDs, markerstrokewidth = 0,
-     size = (600, 1000), clim = (0,1)
+     markersize = 6, markerstrokewidth = 0,
+     size = (600, 1000), clim = (0, 1)
      )

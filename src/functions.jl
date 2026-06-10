@@ -133,15 +133,17 @@ function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims =
    SOSs, GNDs
 end
 
-# Calculate just the GND value for every internal node, returning the node names
-# alongside their GNDs. Lighter than `node_based_analysis`, which also builds the
-# per-cell SOS maps - use this for a fast divergence scan across the whole tree.
-# Defaults to the :tipshuffle null. Nodes that cannot be analysed get GND = NaN.
+# Calculate the GND value for every internal node, returned as a Dict keyed by
+# node name (GND = NaN where a node cannot be analysed). Lighter than
+# `node_based_analysis`, which also builds the per-cell SOS maps - use this for a
+# fast divergence scan. Defaults to the :tipshuffle null. The Dict can be passed
+# straight to Phylo's tree plot recipe as `marker_z`, which looks values up by
+# node name.
 function node_gnd(assemblage::Assemblage, tree::AbstractTree; nsims = 100, method = :tipshuffle)
     nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
-    GNDs = Vector{Float64}(undef, length(nodevec))
-    @progress for (i, node) in enumerate(nodevec)
-        GNDs[i] = process_node(assemblage, tree, node; nsims, method)[2]
+    gnd = Dict{eltype(nodevec), Float64}()
+    @progress for node in nodevec
+        gnd[node] = process_node(assemblage, tree, node; nsims, method)[2]
     end
-    nodevec, GNDs
+    gnd
 end
