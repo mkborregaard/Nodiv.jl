@@ -26,9 +26,10 @@ end
 # Subset an Assemblage to the clade descending from a node.
 get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree, node))
 
-# Plot a parent clade alongside its two descendant clades.
-# Defined as a plot recipe so the package depends only on RecipesBase; the
-# actual plotting backend (Plots) is supplied by the caller. Use as
+# Plot a node in a 2x2 grid: the parent clade (top-left), the descendant SOS
+# mapped over the assemblage's coordinates (top-right, RdYlBu), and the two child
+# clades on the bottom row. Defined as a plot recipe so the package depends only
+# on RecipesBase; the plotting backend (Plots) is supplied by the caller. Use as
 # `plot_node(assemblage, tree, node)`.
 @userplot Plot_Node
 
@@ -39,21 +40,31 @@ get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree,
     assmch1 = get_clade(assm, tree, ch1)
     assmch2 = get_clade(assm, tree, ch2)
 
-    layout := (1, 3)
-    size --> (1000, 350)
+    # SOS of the first descendant over the parent clade's cells (fast :tipshuffle null)
+    sos = calculate_SOS(simulate_descendants(assm, tree, ch1; method = :swap))
 
-    @series begin
+    layout := (2, 2)
+    size --> (900, 800)
+
+    @series begin              # top-left: parent clade
         subplot := 1
         title := "parent"
         assm
     end
-    @series begin
+    @series begin              # top-right: SOS in environmental space
         subplot := 2
+        title := "SOS"
+        fillcolor := :RdYlBu
+        clim := (-8, 8)
+        sos, assm
+    end
+    @series begin              # bottom-left: child 1
+        subplot := 3
         title := "child 1"
         assmch1
     end
-    @series begin
-        subplot := 3
+    @series begin              # bottom-right: child 2
+        subplot := 4
         title := "child 2"
         assmch2
     end

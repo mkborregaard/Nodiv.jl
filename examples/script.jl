@@ -82,7 +82,7 @@ GND = calculate_GND(sims)
 ### Putting it all together
 
 # use as
-SOS, GND = process_node(birds, tree, randnode; method = :tipshuffle)
+SOS, GND = process_node(birds, tree, randnode; method = :swap) #:tipshuffle)
 
 ### Calculate GND for all nodes
 
@@ -90,7 +90,7 @@ SOS, GND = process_node(birds, tree, randnode; method = :tipshuffle)
 # GND (no SOS maps), and defaults to the fast :tipshuffle null, so it runs over
 # the full bird tree in reasonable time. (`node_based_analysis(birds, tree;
 # method = :tipshuffle)` is still available if you also want the per-cell SOS maps.)
-gnd = node_gnd(birds, tree)   # Dict(nodename => GND), defaults to :tipshuffle
+gnd = node_gnd(birds, tree; method = :swap)   # Dict(nodename => GND), defaults to :tipshuffle
 
 # strongly divergent nodes: GND > 0.8
 divergent = [node for (node, g) in gnd if !isnan(g) && g > 0.8]
@@ -161,4 +161,4 @@ plot(sos, birds, clim = (-8, 8), fillcolor = :RdYlBu,
 # plot the parent-vs-descendants distributions for the most divergent node.
 # (Pick from `divergent` rather than hard-coding a name: Node N labels are assigned
 # at parse time and only exist on this exact tree - check with `hasnode(tree, n)`.)
-plot_node(birds, tree, "Node 19946")
+plot_node(birds, tree, "Node 15645")
