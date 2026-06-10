@@ -4,19 +4,19 @@ using Distances, MultivariateStats
 using Nodiv
 
 # Data files live in the local SpatialEcology dev copy's docs.
-const datadir = "/Users/cvg147/.julia/dev/SpatialEcology/docs/data"
+const datadir = "/Users/cvg147/Dropbox/Arbejde/Current projects/NodivWorkshop"
 
 ### Load data and create objects
 
-phylocom = CSV.read(joinpath(datadir, "tyrann_phylocom.tsv"), DataFrame)
+phylocom = CSV.read(joinpath(datadir, "PAM_E.csv"), DataFrame)
 first(phylocom, 4)
 
-coord = CSV.read(joinpath(datadir, "tyrann_coords.tsv"), DataFrame)
+coord = CSV.read(joinpath(datadir, "Env.csv"), DataFrame)
 first(coord, 4)
 
-phylocom.Plot = string.(phylocom.Plot)
-coord.cell = string.(coord.cell)
-tyrants = Assemblage(phylocom, coord)
+#phylocom.Plot = string.(phylocom.Plot)
+#coord.cell = string.(coord.cell)
+birds = Assemblage(phylocom, coord)
 
 default(color = cgrad(:Spectral, rev = true))
 plot(tyrants)
