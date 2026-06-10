@@ -1,5 +1,5 @@
 using CSV, DataFrames, SpatialEcology, Phylo, Plots
-using Distances, MultivariateStats
+using MultivariateStats, Statistics
 
 using Nodiv
 
@@ -43,26 +43,6 @@ birds = Assemblage(phylocom, coord)
 
 default(color = cgrad(:Spectral, rev = true))
 plot(birds)
-
-### Ordinate sites in species space
-#
-# NOTE: MultivariateStats provides *metric* MDS (classical / PCoA-style), not
-# non-metric NMDS — there is no off-the-shelf Kruskal NMDS in the Julia
-# ecosystem. This is the closest readily available ordination; swap in a
-# dedicated NMDS implementation if strict non-metric scaling is required.
-
-# Jaccard dissimilarity between sites (presence/absence data). `occurrences`
-# returns a species-by-site matrix, so sites are the columns (dims = 2).
-# Qualify `pairwise` because both Distances and SpatialEcology export it.
-sitedist = Distances.pairwise(Jaccard(), Matrix(occurrences(birds)); dims = 2)
-
-mds = fit(MDS, sitedist; distances = true, maxoutdim = 2)
-mdscoords = predict(mds)  # 2 x nsites
-
-scatter(mdscoords[1, :], mdscoords[2, :],
-    marker_z = richness(birds), label = "",
-    xlabel = "MDS axis 1", ylabel = "MDS axis 2",
-    colorbar_title = "richness", title = "Site ordination (metric MDS, Jaccard)")
 
 # birds.nwk stores support values as internal node labels, and support = 1
 # recurs thousands of times; Phylo requires unique node names, so strip the
@@ -133,3 +113,33 @@ plot(tree,
      markersize = 6, markerstrokewidth = 0,
      size = (600, 1000), clim = (0, 1)
      )
+
+### Similarity of SOS patterns among strongly divergent nodes
+
+# Take every node with GND > 0.85, compute its per-cell SOS pattern, correlate
+# the patterns pairwise (over cells where both are defined - SOS is NaN where a
+# clade is absent), turn correlations into distances (1 - |r|), and ordinate the
+# nodes with MDS so nodes with similar SOS patterns sit close together.
+divergent = [node for (node, g) in gnd if !isnan(g) && g > 0.85]
+
+# cells x nodes matrix of SOS patterns
+sosmat = reduce(hcat, process_node(birds, tree, node; method = :tipshuffle)[1] for node in divergent)
+
+# pairwise-complete correlations -> distance = 1 - |r|
+nnode = length(divergent)
+D = zeros(nnode, nnode)
+for i in 1:nnode, j in i+1:nnode
+    a, b = view(sosmat, :, i), view(sosmat, :, j)
+    ok = .!(isnan.(a) .| isnan.(b))
+    r = count(ok) > 2 ? cor(a[ok], b[ok]) : 0.0
+    D[i, j] = D[j, i] = 1 - abs(isnan(r) ? 0.0 : r)
+end
+
+# MDS of the node-distance matrix
+nodemds = fit(MDS, D; distances = true, maxoutdim = 2)
+nodecoords = predict(nodemds)   # 2 x nnode
+
+scatter(nodecoords[1, :], nodecoords[2, :],
+    series_annotations = text.(divergent, 6), label = "",
+    xlabel = "MDS axis 1", ylabel = "MDS axis 2",
+    title = "Similarity of SOS patterns (nodes with GND > 0.85)")
