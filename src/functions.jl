@@ -14,8 +14,14 @@ using Statistics
 using StatsBase: tiedrank, sample
 using ProgressLogging
 
-# All tips/species descending from a node.
-nodespecies(tree, node) = filter(x -> isleaf(tree, x), getdescendants(tree, node))
+# All tips/species descending from a node (or the node itself if it is a tip).
+# Returns a concretely-typed Vector{String}: `getdescendants` is typed as
+# Union{Nothing,String}, and an empty/tip result of that type misses the name
+# matching method used by the downstream `view`.
+function nodespecies(tree, node)
+    isleaf(tree, node) && return String[getnodename(tree, node)]
+    String[x for x in getdescendants(tree, node) if isleaf(tree, x)]
+end
 
 # Subset an Assemblage to the clade descending from a node.
 get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree, node))
