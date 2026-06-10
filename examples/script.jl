@@ -147,6 +147,16 @@ dy = 0.025 * (yr[2] - yr[1])
 annotate!(plt, [(nodecoords[1, i], nodecoords[2, i] + dy, text(divergent[i], 6, :bottom))
                 for i in eachindex(divergent)])
 
+### Map a node's SOS onto environmental space
+
+# SpatialEcology has a recipe `plot(values, assemblage)` that draws a per-site
+# value vector over the assemblage's coordinates. Use it to map a node's SOS (the
+# standardized clade-richness deviation per cell) onto the PC1/PC2 (XY) grid.
+focal = argmax(node -> gnd[node], divergent)   # most divergent node; pick any
+sos, _ = process_node(birds, tree, focal; method = :tipshuffle)
+plot(sos, birds, clim = (-8, 8), fillcolor = :RdYlBu,
+     title = "SOS in environmental space - $focal", colorbar_title = "SOS")
+
 
 # plot the parent-vs-descendants distributions for the most divergent node.
 # (Pick from `divergent` rather than hard-coding a name: Node N labels are assigned
