@@ -1,4 +1,5 @@
 Manifest*.toml
 
-# generated example figures
+# generated example figures and cached analysis objects
 *.png
+*.jld2

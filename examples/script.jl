@@ -1,150 +1,125 @@
-using CSV, DataFrames, SpatialEcology, Phylo, Plots
-using MultivariateStats, Statistics
+# Node-based analysis of bird diversity, run in parallel in two spaces:
+#   birds_e - environmental (PC1/PC2) space  (PAM_E + Env.csv)
+#   birds_g - geographic space               (PAM_G + g_space shapefile)
+# Reusable, general steps live in the Nodiv package; everything dataset-specific
+# (file layout, taxonomy crosswalk, coordinate building) stays in this script.
 
+using CSV, DataFrames, SpatialEcology, Phylo, Plots, Shapefile
+using MultivariateStats, Statistics, JLD2
 using Nodiv
 
-const datadir = "/Users/cvg147/Dropbox/Arbejde/Current projects/NodivWorkshop"
+datadir = "/Users/cvg147/Dropbox/Arbejde/Current projects/NodivWorkshop"
+default(color = cgrad(:Spectral, rev = true))
 
-### Load data and create objects
+### Dataset-specific helpers ---------------------------------------------------
 
-pam = CSV.read(joinpath(datadir, "PAM_E.csv"), DataFrame)
-
-env = CSV.read(joinpath(datadir, "Env.csv"), DataFrame)
-
-# Cross.csv links the PAM/BirdLife taxonomy (Species1) to the tree/BirdTree
-# taxonomy (Species3). Use it to relabel PAM species to their tree-tip names so
-# the datasets share as many species as possible; unmatched names fall back to a
-# plain underscore conversion. (Several BirdLife taxa can map to one BirdTree
-# tip, in which case their occurrences are merged into that tip.)
+# Cross.csv maps the PAM/BirdLife taxonomy (Species1) to the tree/BirdTree
+# taxonomy (Species3); relabel PAM species to the tree names so the datasets
+# share as many taxa as possible.
 cross = CSV.read(joinpath(datadir, "Cross.csv"), DataFrame)
 namemap = Dict(string(r.Species1) => replace(string(r.Species3), " " => "_")
                for r in eachrow(cross) if !ismissing(r.Species1) && !ismissing(r.Species3))
 
-# PAM_E is long-format presence/absence: ID_env links to the env cell (site),
-# Species is the species name, and there is no abundance column. Build the
-# 3-column phylocom table [site, abundance, species] that ComMatrix expects.
-phylocom = DataFrame(site = string.(pam.ID_env),
-                     abundance = 1,
-                     species = [get(namemap, s, replace(s, " " => "_")) for s in pam.Species])
+# read a Newick tree, stripping numeric internal (support) labels that Phylo
+# rejects as duplicate node names
+readtree(path) = parsenewick(replace(read(path, String), r"\)[0-9.]+" => ")"))
 
-# Coordinates live in environmental (PC) space: use each cell's bin midpoint,
-# x = mean(xmin, xmax), y = mean(ymin, ymax). SpatialEcology aligns the matrix
-# and coordinates by row order (not by name), so reduce + reorder env to exactly
-# the assemblage's sites, in the same first-appearance order ComMatrix will use.
-sites = unique(phylocom.site)
-idx = indexin(sites, string.(env.ID_env))
-coord = DataFrame(site = sites,
-                  x = (env.xmin[idx] .+ env.xmax[idx]) ./ 2,
-                  y = (env.ymin[idx] .+ env.ymax[idx]) ./ 2)
-
-birds = Assemblage(phylocom, coord)
-
-default(color = cgrad(:Spectral, rev = true))
-plot(birds)
-
-# birds.nwk stores support values as internal node labels, and support = 1
-# recurs thousands of times; Phylo requires unique node names, so strip the
-# internal labels (the numeric token right after a close paren) before parsing.
-nwk = replace(read(joinpath(datadir, "birds.nwk"), String), r"\)[0-9.]+" => ")")
-tree = parsenewick(nwk)
-# keep only tips shared with the assemblage (after the Cross.csv relabeling) so
-# clade subsetting never references a species that is absent from the data
-keeptips!(tree, intersect(getleafnames(tree), speciesnames(birds)))
-sort!(tree) # sort the nodes on the tree in order of size - useful for plotting
-plot(tree, treetype = :fan, showtips = false, tipfont = (5,))
-
-### Extract information from a single clade
-
-nodes = nodenamefilter(!isleaf, tree)
-nodevec = collect(nodes)
-first(nodevec, 4)
-
-randnode = nodevec[131]
-
-first(nodespecies(tree, randnode), 4)
-
-rand_clade = get_clade(birds, tree, randnode)
-plot(rand_clade, title = randnode)
-
-### Comparing the richness of sister clades
-
-plot_node(birds, tree, randnode)
-
-### Using randomization to assess significance of distribution differences
-
-ch1, ch2 = getchildren(tree, randnode)[1:2]
-sims = simulate_descendants(rand_clade, tree, ch1; method = :tipshuffle)
-SOS = calculate_SOS(sims)
-plot(SOS, rand_clade, clim = (-8,8), fillcolor = :RdYlBu, title = "SOS for clade $randnode")
-
-GND = calculate_GND(sims)
-
-### Putting it all together
-
-# use as
-SOS, GND = process_node(birds, tree, randnode; method = :swap) #:tipshuffle)
-
-### Calculate GND for all nodes
-
-# Scan node divergence across the whole tree. `node_gnd` returns just the per-node
-# GND (no SOS maps), and defaults to the fast :tipshuffle null, so it runs over
-# the full bird tree in reasonable time. (`node_based_analysis(birds, tree;
-# method = :tipshuffle)` is still available if you also want the per-cell SOS maps.)
-gnd = node_gnd(birds, tree; method = :tipshuffle, nsims = 1000)   # Dict(nodename => GND), defaults to :tipshuffle
-
-# strongly divergent nodes: GND > 0.8
-divergent = [node for (node, g) in gnd if !isnan(g) && g > 0.8]
-sort(divergent, by = n -> gnd[n], rev = true)   # inspect: most divergent first
-
-# Map GND onto the tree, showing ONLY the divergent nodes. Phylo's recipe draws a
-# marker at every node and (in current Plots) renders NaN-marker_z nodes as solid
-# black, so colour can't hide the rest. Instead give each node an explicit size -
-# 6 for divergent nodes, 0 (nothing drawn) otherwise - in the recipe's own node
-# order, which comes from the layout helper Phylo._findxy.
-divset = Set(divergent)
-layoutnodes = Phylo._findxy(tree)[3]
-markersizes = [node in divset ? 6 : 0 for node in layoutnodes]
-
-plot(tree, treetype = :fan, showtips = false,
-     marker_z = Dict(node => gnd[node] for node in divergent),
-     markersize = markersizes, markerstrokewidth = 0,
-     color = cgrad(:YlOrRd, 10, categorical = true),
-     size = (1000, 1000), clim = (0, 1)
-     )
-
-### Similarity of SOS patterns among strongly divergent nodes
-
-# Using `divergent` (GND > 0.8, defined above): compute each node's per-cell SOS
-# pattern, correlate pairwise (over cells where both are defined - SOS is NaN
-# where a clade is absent), convert to distances (1 - |r|), and ordinate with MDS
-# so nodes with similar SOS patterns sit close together.
-
-# cells x nodes matrix of SOS patterns
-sosmat = reduce(hcat, process_node(birds, tree, node; method = :tipshuffle)[1] for node in divergent)
-
-# pairwise-complete correlations -> distance = 1 - |r|
-nnode = length(divergent)
-D = zeros(nnode, nnode)
-for i in 1:nnode, j in i+1:nnode
-    a, b = view(sosmat, :, i), view(sosmat, :, j)
-    ok = .!(isnan.(a) .| isnan.(b))
-    r = count(ok) > 2 ? cor(a[ok], b[ok]) : 0.0
-    D[i, j] = D[j, i] = 1 - abs(isnan(r) ? 0.0 : r)
+# build an Assemblage from long-format occurrences + a (site, x, y) coordinate
+# lookup: relabel species to the tree taxonomy, and align the coordinates to the
+# matrix's sites (SpatialEcology matches by row order, not by name).
+function build_assemblage(species_raw, sitevals, coords)
+    species = [get(namemap, s, replace(s, " " => "_")) for s in species_raw]
+    pc = DataFrame(site = string.(sitevals), abundance = 1, species = species)
+    sites = unique(pc.site)
+    idx = indexin(sites, string.(coords.site))
+    Assemblage(pc, DataFrame(site = sites, x = coords.x[idx], y = coords.y[idx]))
 end
 
-# MDS of the node-distance matrix
-nodemds = fit(MDS, D; distances = true, maxoutdim = 2)
-nodecoords = predict(nodemds)   # 2 x nnode
+### Environmental-space assemblage ---------------------------------------------
 
-# `:bottom` anchors each label at its bottom edge, so it sits just above its point
-scatter(nodecoords[1, :], nodecoords[2, :], label = "",
-    series_annotations = text.(divergent, 6, :bottom),
-    xlabel = "MDS axis 1", ylabel = "MDS axis 2",
-    title = "Similarity of SOS patterns (nodes with GND > 0.8)")
+env = CSV.read(joinpath(datadir, "Env.csv"), DataFrame)
+pam_e = CSV.read(joinpath(datadir, "PAM_E.csv"), DataFrame)
+# env-space coordinates: each cell's PC bin midpoint
+coords_e = DataFrame(site = string.(env.ID_env),
+                     x = (env.xmin .+ env.xmax) ./ 2,
+                     y = (env.ymin .+ env.ymax) ./ 2)
+birds_e = build_assemblage(pam_e.Species, pam_e.ID_env, coords_e)
+addsitestats!(birds_e, env, :ID_env)        # attach PC bins, area, occupancy, ...
+plot(birds_e)
 
-### Map a node's SOS onto environmental space
+### Geographic-space assemblage ------------------------------------------------
 
-# plot the parent-vs-descendants distributions for the most divergent node.
-# (Pick from `divergent` rather than hard-coding a name: Node N labels are assigned
-# at parse time and only exist on this exact tree - check with `hasnode(tree, n)`.)
-plot_node(birds, tree, "Node 12139")
+shp = Shapefile.Table(joinpath(datadir, "g_space", "BehrmannMeterGrid_WGS84_land_PCA_30.shp"))
+centroid(g) = (ex = extrema(p.x for p in g.points); ey = extrema(p.y for p in g.points);
+               ((ex[1] + ex[2]) / 2, (ey[1] + ey[2]) / 2))
+cents = centroid.(Shapefile.shapes(shp))
+# The equal-area cells become irregular once reprojected to lon/lat, so snap them
+# to a regular grid: bin longitude into ~1-degree columns and sin(latitude) into
+# rows (which makes the equal-area rows evenly spaced), then map each bin to a
+# contiguous integer index so SpatialEcology builds a clean GridData (gridvar
+# needs uniform spacing). Warps the map but keeps every cell; a few cells share a
+# grid square - that only matters for the image, not the analysis.
+# (returns Float indices - SpatialEcology's grid indexing requires float coords)
+gridindex(v) = (u = sort(unique(v)); pos = Dict(u .=> eachindex(u)); Float64[pos[x] for x in v])
+coords_g = DataFrame(site = string.(shp.ID_geo),
+                     x = gridindex(round.(Int, first.(cents))),
+                     y = gridindex(round.(Int, sin.(deg2rad.(last.(cents))) .* 180)))
+geo_attrs = select(DataFrame(shp), Not(:geometry))
+geo_attrs.ID_geo = string.(geo_attrs.ID_geo)
+
+pam_g = CSV.read(joinpath(datadir, "PAM_G.csv"), DataFrame)
+birds_g = build_assemblage(pam_g.Species, pam_g.ID_geo, coords_g)
+addsitestats!(birds_g, geo_attrs, :ID_geo)  # attach CHELSA bioclim, PC1-3, area, ...
+plot(birds_g)
+
+### Shared phylogeny -----------------------------------------------------------
+
+tree = readtree(joinpath(datadir, "birds.nwk"))
+prune_to_shared!(tree, birds_e, birds_g)    # keep only taxa present in both
+sort!(tree)
+
+### Heavy step: GND + SOS for every node, both spaces, cached to disk ----------
+# `node_analysis` computes GND and the per-cell SOS together (SOS is needed for
+# GND anyway). This is the slow part - randomisations over the whole tree, and
+# ~18k cells for the geographic scan - so cache it: re-running the script just
+# reloads the results and jumps straight to the plotting below.
+cachefile = joinpath(@__DIR__, "node_analysis.jld2")
+if !isfile(cachefile)
+    res_e = node_analysis(birds_e, tree)
+    res_g = node_analysis(birds_g, tree)
+    jldsave(cachefile; res_e, res_g)
+end
+res_e, res_g = load(cachefile, "res_e", "res_g")
+gnd_e, sos_e = res_e.gnd, res_e.sos      # gnd: node => GND; sos: node => SOS vector
+gnd_g, sos_g = res_g.gnd, res_g.sos
+
+### ---- Exploratory plotting (from the cached GND/SOS; compare `_e` vs `_g`) -- ###
+
+# GND mapped onto the tree (Nodiv recipe; pass a filtered Dict to show a subset)
+plot_gnd(tree, gnd_e)
+plot_gnd(tree, gnd_g)
+
+# strongly divergent nodes in each space
+divergent_e = divergent_nodes(gnd_e; threshold = 0.8)
+divergent_g = divergent_nodes(gnd_g; threshold = 0.8)
+
+# SOS of the most divergent node mapped onto each space (cached SOS, no recompute)
+focal_e = argmax(n -> gnd_e[n], divergent_e)
+plot(sos_e[focal_e], birds_e, fillcolor = :RdYlBu, clim = (-8, 8), title = "env SOS - $focal_e")
+focal_g = argmax(n -> gnd_g[n], divergent_g)
+plot(sos_g[focal_g], birds_g, fillcolor = :RdYlBu, clim = (-8, 8), title = "geo SOS - $focal_g")
+
+# parent/SOS/children panel for that node
+plot_node(birds_e, tree, focal_e)
+plot_node(birds_g, tree, focal_g)
+
+# ordinate the divergent nodes by SOS-pattern similarity (cached SOS -> distances
+# from Nodiv -> MDS; presentation stays here)
+function sos_mds_plot(sos, nodes, title)
+    coords = predict(fit(MDS, sos_distances([sos[n] for n in nodes]); distances = true, maxoutdim = 2))
+    scatter(coords[1, :], coords[2, :], label = "",
+            series_annotations = text.(nodes, 6, :bottom),
+            xlabel = "MDS axis 1", ylabel = "MDS axis 2", title = title)
+end
+sos_mds_plot(sos_e, divergent_e, "SOS-pattern similarity (environmental)")
+sos_mds_plot(sos_g, divergent_g, "SOS-pattern similarity (geographic)")
