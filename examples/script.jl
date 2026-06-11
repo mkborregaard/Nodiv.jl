@@ -53,17 +53,16 @@ shp = Shapefile.Table(joinpath(datadir, "g_space", "BehrmannMeterGrid_WGS84_land
 centroid(g) = (ex = extrema(p.x for p in g.points); ey = extrema(p.y for p in g.points);
                ((ex[1] + ex[2]) / 2, (ey[1] + ey[2]) / 2))
 cents = centroid.(Shapefile.shapes(shp))
-# The equal-area cells become irregular once reprojected to lon/lat, so snap them
-# to a regular grid: bin longitude into ~1-degree columns and sin(latitude) into
-# rows (which makes the equal-area rows evenly spaced), then map each bin to a
-# contiguous integer index so SpatialEcology builds a clean GridData (gridvar
-# needs uniform spacing). Warps the map but keeps every cell; a few cells share a
-# grid square - that only matters for the image, not the analysis.
-# (returns Float indices - SpatialEcology's grid indexing requires float coords)
+# The reprojected equal-area cells don't form a clean lon/lat lattice, so snap
+# them to a regular 1-degree equirectangular grid: round lon and lat to the
+# nearest degree and dense-rank to contiguous integer indices (returned as Float,
+# since SpatialEcology's grid indexing requires float coords). The 1-degree bins
+# absorb the sub-degree reprojection skew so each latitude band groups cleanly;
+# this warps area (equirectangular, not equal-area) but tiles into a clean grid.
 gridindex(v) = (u = sort(unique(v)); pos = Dict(u .=> eachindex(u)); Float64[pos[x] for x in v])
 coords_g = DataFrame(site = string.(shp.ID_geo),
                      x = gridindex(round.(Int, first.(cents))),
-                     y = gridindex(round.(Int, sin.(deg2rad.(last.(cents))) .* 180)))
+                     y = gridindex(round.(Int, last.(cents))))
 geo_attrs = select(DataFrame(shp), Not(:geometry))
 geo_attrs.ID_geo = string.(geo_attrs.ID_geo)
 
