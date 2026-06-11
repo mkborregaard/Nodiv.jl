@@ -90,7 +90,7 @@ SOS, GND = process_node(birds, tree, randnode; method = :swap) #:tipshuffle)
 # GND (no SOS maps), and defaults to the fast :tipshuffle null, so it runs over
 # the full bird tree in reasonable time. (`node_based_analysis(birds, tree;
 # method = :tipshuffle)` is still available if you also want the per-cell SOS maps.)
-gnd = node_gnd(birds, tree; method = :swap)   # Dict(nodename => GND), defaults to :tipshuffle
+gnd = node_gnd(birds, tree; method = :tipshuffle, nsims = 1000)   # Dict(nodename => GND), defaults to :tipshuffle
 
 # strongly divergent nodes: GND > 0.8
 divergent = [node for (node, g) in gnd if !isnan(g) && g > 0.8]
@@ -136,29 +136,15 @@ end
 nodemds = fit(MDS, D; distances = true, maxoutdim = 2)
 nodecoords = predict(nodemds)   # 2 x nnode
 
-plt = scatter(nodecoords[1, :], nodecoords[2, :], label = "",
+# `:bottom` anchors each label at its bottom edge, so it sits just above its point
+scatter(nodecoords[1, :], nodecoords[2, :], label = "",
+    series_annotations = text.(divergent, 6, :bottom),
     xlabel = "MDS axis 1", ylabel = "MDS axis 2",
     title = "Similarity of SOS patterns (nodes with GND > 0.8)")
 
-# put each node label just above its point (offset by a small fraction of the
-# y-range, anchored at the text's bottom) so the markers don't cover the labels
-yr = extrema(nodecoords[2, :])
-dy = 0.025 * (yr[2] - yr[1])
-annotate!(plt, [(nodecoords[1, i], nodecoords[2, i] + dy, text(divergent[i], 6, :bottom))
-                for i in eachindex(divergent)])
-
 ### Map a node's SOS onto environmental space
-
-# SpatialEcology has a recipe `plot(values, assemblage)` that draws a per-site
-# value vector over the assemblage's coordinates. Use it to map a node's SOS (the
-# standardized clade-richness deviation per cell) onto the PC1/PC2 (XY) grid.
-focal = argmax(node -> gnd[node], divergent)   # most divergent node; pick any
-sos, _ = process_node(birds, tree, focal; method = :tipshuffle)
-plot(sos, birds, clim = (-8, 8), fillcolor = :RdYlBu,
-     title = "SOS in environmental space - $focal", colorbar_title = "SOS")
-
 
 # plot the parent-vs-descendants distributions for the most divergent node.
 # (Pick from `divergent` rather than hard-coding a name: Node N labels are assigned
 # at parse time and only exist on this exact tree - check with `hasnode(tree, n)`.)
-plot_node(birds, tree, "Node 15645")
+plot_node(birds, tree, "Node 12139")
