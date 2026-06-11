@@ -3,3 +3,4 @@ Manifest*.toml
 # generated example figures and cached analysis objects
 *.png
 *.jld2
+.DS_Store
