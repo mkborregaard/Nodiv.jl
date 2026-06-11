@@ -5,7 +5,7 @@ include("functions.jl")
 export nodespecies, get_clade
 export simulate_descendants
 export calculate_GND, calculate_SOS
-export process_node, node_based_analysis, node_gnd, node_analysis, NodeAnalysis
+export process_node, node_based_analysis, node_analysis, NodeAnalysis
 export prune_to_shared!, divergent_nodes, sos_distances
 
 end

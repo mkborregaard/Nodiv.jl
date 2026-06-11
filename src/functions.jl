@@ -88,8 +88,8 @@ end
 
 # Plot per-node values (e.g. GND) on the tree. `gndvals` is a Dict of node name
 # => value; a coloured marker is drawn at every node present in it (NaN values
-# skipped) and nothing elsewhere. Pass the full `node_gnd` Dict to show all
-# analysable nodes, or a filtered Dict (e.g. only divergent nodes) for a subset.
+# skipped) and nothing elsewhere. Pass a NodeAnalysis (or its `gnd` Dict) to show
+# all analysable nodes, or a filtered Dict (e.g. only divergent nodes) for a subset.
 # Use as `plot_gnd(tree, gnd)`.
 @userplot Plot_Gnd
 
@@ -202,21 +202,6 @@ function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims =
    SOSs, GNDs
 end
 
-# Calculate the GND value for every internal node, returned as a Dict keyed by
-# node name (GND = NaN where a node cannot be analysed). Lighter than
-# `node_based_analysis`, which also builds the per-cell SOS maps - use this for a
-# fast divergence scan. Defaults to the :tipshuffle null. The Dict can be passed
-# straight to Phylo's tree plot recipe as `marker_z`, which looks values up by
-# node name.
-function node_gnd(assemblage::Assemblage, tree::AbstractTree; nsims = 100, method = :tipshuffle)
-    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
-    gnd = Dict{eltype(nodevec), Float64}()
-    @progress for node in nodevec
-        gnd[node] = process_node(assemblage, tree, node; nsims, method)[2]
-    end
-    gnd
-end
-
 # Compute both the per-cell SOS pattern and the GND for every internal node in a
 # single pass (the SOS is calculated anyway when getting GND, so this avoids
 # recomputing it later). Returns a `NodeAnalysis` to hand to the explore
@@ -243,8 +228,8 @@ function prune_to_shared!(tree, assemblages...)
     tree
 end
 
-# Node names whose GND exceeds `threshold` (NaN GNDs excluded). Accepts a GND Dict
-# (from `node_gnd`) or a `NodeAnalysis` (from `node_analysis`).
+# Node names whose GND exceeds `threshold` (NaN GNDs excluded). Accepts a `NodeAnalysis`
+# (from `node_analysis`) or a plain GND Dict.
 divergent_nodes(gnd::AbstractDict; threshold = 0.8) =
     [node for (node, g) in gnd if !isnan(g) && g > threshold]
 divergent_nodes(res::NodeAnalysis; threshold = 0.8) = divergent_nodes(res.gnd; threshold)
