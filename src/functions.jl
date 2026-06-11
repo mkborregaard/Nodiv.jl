@@ -64,7 +64,7 @@ end
 
     @series begin              # top-left: parent clade
         subplot := 1
-        title := "parent"
+        title := string(node)
         assm
     end
     @series begin              # top-right: SOS in environmental space
@@ -76,12 +76,12 @@ end
     end
     @series begin              # bottom-left: child 1
         subplot := 3
-        title := "child 1"
+        title := string(ch1)
         assmch1
     end
     @series begin              # bottom-right: child 2
         subplot := 4
-        title := "child 2"
+        title := string(ch2)
         assmch2
     end
 end

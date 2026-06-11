@@ -53,16 +53,18 @@ shp = Shapefile.Table(joinpath(datadir, "g_space", "BehrmannMeterGrid_WGS84_land
 centroid(g) = (ex = extrema(p.x for p in g.points); ey = extrema(p.y for p in g.points);
                ((ex[1] + ex[2]) / 2, (ey[1] + ey[2]) / 2))
 cents = centroid.(Shapefile.shapes(shp))
-# The reprojected equal-area cells don't form a clean lon/lat lattice, so snap
-# them to a regular 1-degree equirectangular grid: round lon and lat to the
-# nearest degree and dense-rank to contiguous integer indices (returned as Float,
-# since SpatialEcology's grid indexing requires float coords). The 1-degree bins
-# absorb the sub-degree reprojection skew so each latitude band groups cleanly;
-# this warps area (equirectangular, not equal-area) but tiles into a clean grid.
+# These are Behrmann equal-area cells; recover that grid by ranking longitude into
+# columns and sin(latitude) into rows. The sin-latitude axis is scaled by
+# 1/(dlon * cos^2(30 deg)) relative to the 1-degree longitude columns (Behrmann
+# standard parallel = 30 deg) so the cells come out square, then rounded to the cell
+# resolution and dense-ranked to contiguous integer indices (Float, since
+# SpatialEcology's grid indexing needs float coords). Binning at the cell resolution
+# absorbs the sub-degree reprojection skew so each band groups cleanly into one row.
 gridindex(v) = (u = sort(unique(v)); pos = Dict(u .=> eachindex(u)); Float64[pos[x] for x in v])
+behrmann = 1 / (deg2rad(1) * cosd(30)^2)   # ~76.4: sin-lat scale for square cells
 coords_g = DataFrame(site = string.(shp.ID_geo),
                      x = gridindex(round.(Int, first.(cents))),
-                     y = gridindex(round.(Int, last.(cents))))
+                     y = gridindex(round.(Int, sin.(deg2rad.(last.(cents))) .* behrmann)))
 geo_attrs = select(DataFrame(shp), Not(:geometry))
 geo_attrs.ID_geo = string.(geo_attrs.ID_geo)
 
