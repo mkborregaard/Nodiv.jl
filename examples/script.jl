@@ -93,13 +93,14 @@ res_e, res_g = load(cachefile, "res_e", "res_g")   # each a NodeAnalysis (gnd + 
 
 ### ---- Exploratory plotting (from the cached NodeAnalysis; `_e` vs `_g`) ----- ###
 
-# GND mapped onto the tree (pass the NodeAnalysis, or a filtered Dict for a subset)
-plot_gnd(tree, res_e)
-plot_gnd(tree, res_g)
-
 # strongly divergent nodes in each space
 divergent_e = divergent_nodes(res_e; threshold = 0.8)
 divergent_g = divergent_nodes(res_g; threshold = 0.8)
+
+# GND of just the divergent nodes mapped onto the tree (plot_gnd marks every node
+# in the Dict it is given, so pass the divergent subset rather than the full result)
+plot_gnd(tree, Dict(n => res_e.gnd[n] for n in divergent_e))
+plot_gnd(tree, Dict(n => res_g.gnd[n] for n in divergent_g))
 
 # SOS of the most divergent node mapped onto each space (cached SOS, no recompute)
 focal_e = argmax(n -> res_e.gnd[n], divergent_e)
