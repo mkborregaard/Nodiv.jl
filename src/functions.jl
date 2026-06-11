@@ -40,8 +40,8 @@ get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree,
     assmch1 = get_clade(assm, tree, ch1)
     assmch2 = get_clade(assm, tree, ch2)
 
-    # SOS of the first descendant over the parent clade's cells (:swap null;
-    # this randomization runs on every plot, so plotting is slower on large clades)
+    # SOS of the first descendant over the parent clade's cells. NB this runs a
+    # randomization on every plot, so the SOS panel varies between calls.
     sos = calculate_SOS(simulate_descendants(assm, tree, ch1; method = :tipshuffle, nsims = 1000))
 
     layout := (2, 2)
