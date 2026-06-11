@@ -62,9 +62,12 @@ cents = centroid.(Shapefile.shapes(shp))
 # absorbs the sub-degree reprojection skew so each band groups cleanly into one row.
 gridindex(v) = (u = sort(unique(v)); pos = Dict(u .=> eachindex(u)); Float64[pos[x] for x in v])
 behrmann = 1 / (deg2rad(1) * cosd(30)^2)   # ~76.4: sin-lat scale for square cells
+# the -0.5 shifts the bin phase so bands sit at bin centres rather than on round()
+# boundaries (the equatorial bands otherwise land exactly on a boundary and split
+# across two rows, leaving a sparse white line at the equator).
 coords_g = DataFrame(site = string.(shp.ID_geo),
                      x = gridindex(round.(Int, first.(cents))),
-                     y = gridindex(round.(Int, sin.(deg2rad.(last.(cents))) .* behrmann)))
+                     y = gridindex(round.(Int, sin.(deg2rad.(last.(cents))) .* behrmann .- 0.5)))
 geo_attrs = select(DataFrame(shp), Not(:geometry))
 geo_attrs.ID_geo = string.(geo_attrs.ID_geo)
 
@@ -123,3 +126,9 @@ function sos_mds_plot(res, nodes, title)
 end
 sos_mds_plot(res_e, divergent_e, "SOS-pattern similarity (environmental)")
 sos_mds_plot(res_g, divergent_g, "SOS-pattern similarity (geographic)")
+
+
+plot_node(birds_e, tree, "Node 12139", res_e)
+plot_node(birds_g, tree, "Node 12139", res_g)
+
+same = divergent_e ∩ divergent_g
