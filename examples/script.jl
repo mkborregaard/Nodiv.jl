@@ -89,37 +89,35 @@ if !isfile(cachefile)
     res_g = node_analysis(birds_g, tree)
     jldsave(cachefile; res_e, res_g)
 end
-res_e, res_g = load(cachefile, "res_e", "res_g")
-gnd_e, sos_e = res_e.gnd, res_e.sos      # gnd: node => GND; sos: node => SOS vector
-gnd_g, sos_g = res_g.gnd, res_g.sos
+res_e, res_g = load(cachefile, "res_e", "res_g")   # each a NodeAnalysis (gnd + sos)
 
-### ---- Exploratory plotting (from the cached GND/SOS; compare `_e` vs `_g`) -- ###
+### ---- Exploratory plotting (from the cached NodeAnalysis; `_e` vs `_g`) ----- ###
 
-# GND mapped onto the tree (Nodiv recipe; pass a filtered Dict to show a subset)
-plot_gnd(tree, gnd_e)
-plot_gnd(tree, gnd_g)
+# GND mapped onto the tree (pass the NodeAnalysis, or a filtered Dict for a subset)
+plot_gnd(tree, res_e)
+plot_gnd(tree, res_g)
 
 # strongly divergent nodes in each space
-divergent_e = divergent_nodes(gnd_e; threshold = 0.8)
-divergent_g = divergent_nodes(gnd_g; threshold = 0.8)
+divergent_e = divergent_nodes(res_e; threshold = 0.8)
+divergent_g = divergent_nodes(res_g; threshold = 0.8)
 
 # SOS of the most divergent node mapped onto each space (cached SOS, no recompute)
-focal_e = argmax(n -> gnd_e[n], divergent_e)
-plot(sos_e[focal_e], birds_e, fillcolor = :RdYlBu, clim = (-8, 8), title = "env SOS - $focal_e")
-focal_g = argmax(n -> gnd_g[n], divergent_g)
-plot(sos_g[focal_g], birds_g, fillcolor = :RdYlBu, clim = (-8, 8), title = "geo SOS - $focal_g")
+focal_e = argmax(n -> res_e.gnd[n], divergent_e)
+plot(res_e.sos[focal_e], birds_e, fillcolor = :RdYlBu, clim = (-8, 8), title = "env SOS - $focal_e")
+focal_g = argmax(n -> res_g.gnd[n], divergent_g)
+plot(res_g.sos[focal_g], birds_g, fillcolor = :RdYlBu, clim = (-8, 8), title = "geo SOS - $focal_g")
 
-# parent/SOS/children panel for that node
-plot_node(birds_e, tree, focal_e)
-plot_node(birds_g, tree, focal_g)
+# parent/SOS/children panel for that node (4th arg = cached SOS, no recompute)
+plot_node(birds_e, tree, focal_e, res_e)
+plot_node(birds_g, tree, focal_g, res_g)
 
 # ordinate the divergent nodes by SOS-pattern similarity (cached SOS -> distances
 # from Nodiv -> MDS; presentation stays here)
-function sos_mds_plot(sos, nodes, title)
-    coords = predict(fit(MDS, sos_distances([sos[n] for n in nodes]); distances = true, maxoutdim = 2))
+function sos_mds_plot(res, nodes, title)
+    coords = predict(fit(MDS, sos_distances(res, nodes); distances = true, maxoutdim = 2))
     scatter(coords[1, :], coords[2, :], label = "",
             series_annotations = text.(nodes, 6, :bottom),
             xlabel = "MDS axis 1", ylabel = "MDS axis 2", title = title)
 end
-sos_mds_plot(sos_e, divergent_e, "SOS-pattern similarity (environmental)")
-sos_mds_plot(sos_g, divergent_g, "SOS-pattern similarity (geographic)")
+sos_mds_plot(res_e, divergent_e, "SOS-pattern similarity (environmental)")
+sos_mds_plot(res_g, divergent_g, "SOS-pattern similarity (geographic)")

@@ -26,6 +26,15 @@ end
 # Subset an Assemblage to the clade descending from a node.
 get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree, node))
 
+# Result of `node_analysis`: `gnd` maps every node name to its GND (NaN where the
+# node cannot be analysed); `sos` maps the analysable nodes to their per-cell SOS
+# vector. Pass it straight to the explore functions - `divergent_nodes`,
+# `plot_gnd`, `plot_node`, `sos_distances` - to reuse cached results.
+struct NodeAnalysis
+    gnd::Dict{String, Float64}
+    sos::Dict{String, Vector{Float64}}
+end
+
 # Plot a node in a 2x2 grid: the parent clade (top-left), the descendant SOS
 # mapped over the assemblage's coordinates (top-right, RdYlBu), and the two child
 # clades on the bottom row. Defined as a plot recipe so the package depends only
@@ -34,15 +43,21 @@ get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree,
 @userplot Plot_Node
 
 @recipe function f(pn::Plot_Node)
-    assemblage, tree, node = pn.args
+    assemblage, tree, node = pn.args[1:3]
     ch1, ch2 = getchildren(tree, node)[1:2]
     assm = get_clade(assemblage, tree, node)
     assmch1 = get_clade(assm, tree, ch1)
     assmch2 = get_clade(assm, tree, ch2)
 
-    # SOS of the first descendant over the parent clade's cells. NB this runs a
-    # randomization on every plot, so the SOS panel varies between calls.
-    sos = calculate_SOS(simulate_descendants(assm, tree, ch1; method = :tipshuffle, nsims = 1000))
+    # SOS for the top-right panel. A 4th argument supplies a cached SOS - either a
+    # `NodeAnalysis` (looked up by node) or a precomputed SOS vector; otherwise it
+    # is recomputed here (a fresh randomization, so the panel varies between calls).
+    sos = if length(pn.args) >= 4
+        cached = pn.args[4]
+        cached isa NodeAnalysis ? cached.sos[node] : cached
+    else
+        calculate_SOS(simulate_descendants(assm, tree, ch1; method = :tipshuffle, nsims = 1000))
+    end
 
     layout := (2, 2)
     size --> (900, 800)
@@ -80,6 +95,7 @@ end
 
 @recipe function f(pg::Plot_Gnd)
     tree, gndvals = pg.args
+    gndvals isa NodeAnalysis && (gndvals = gndvals.gnd)
     shown = Dict(k => v for (k, v) in gndvals if !isnan(v))
 
     # The tree recipe draws a marker at every node and renders NaN-marker_z nodes
@@ -195,19 +211,19 @@ end
 
 # Compute both the per-cell SOS pattern and the GND for every internal node in a
 # single pass (the SOS is calculated anyway when getting GND, so this avoids
-# recomputing it later). Returns a NamedTuple `(; gnd, sos)`: `gnd` maps every
-# node name to its GND (NaN where it cannot be analysed); `sos` maps the
-# analysable nodes to their per-cell SOS vector. Defaults to the :tipshuffle null.
+# recomputing it later). Returns a `NodeAnalysis` to hand to the explore
+# functions. Defaults to the :tipshuffle null. The "compute once, explore a lot"
+# entry point - cache the result (e.g. with JLD2) and reload it.
 function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100, method = :tipshuffle)
     nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
-    gnd = Dict{eltype(nodevec), Float64}()
-    sos = Dict{eltype(nodevec), Vector{Float64}}()
+    gnd = Dict{String, Float64}()
+    sos = Dict{String, Vector{Float64}}()
     @progress for node in nodevec
         s, g = process_node(assemblage, tree, node; nsims, method)
         gnd[node] = g
         isnan(g) || (sos[node] = s)
     end
-    (; gnd, sos)
+    NodeAnalysis(gnd, sos)
 end
 
 # Prune `tree` in place to the tips it shares with all the given assemblage(s),
@@ -219,10 +235,11 @@ function prune_to_shared!(tree, assemblages...)
     tree
 end
 
-# Node names whose GND exceeds `threshold` (NaN GNDs excluded). Companion to
-# `node_gnd`; pass its Dict.
+# Node names whose GND exceeds `threshold` (NaN GNDs excluded). Accepts a GND Dict
+# (from `node_gnd`) or a `NodeAnalysis` (from `node_analysis`).
 divergent_nodes(gnd::AbstractDict; threshold = 0.8) =
     [node for (node, g) in gnd if !isnan(g) && g > threshold]
+divergent_nodes(res::NodeAnalysis; threshold = 0.8) = divergent_nodes(res.gnd; threshold)
 
 # Pairwise distance matrix (1 - |Pearson r|) between per-cell SOS patterns,
 # correlated over cells where both patterns are defined (SOS is NaN where a clade
@@ -240,6 +257,7 @@ function _sos_distances(sosmat)
     end
     D
 end
-sos_distances(sosvectors) = _sos_distances(reduce(hcat, sosvectors))
+sos_distances(sosvectors::AbstractVector) = _sos_distances(reduce(hcat, sosvectors))
+sos_distances(res::NodeAnalysis, nodes) = sos_distances([res.sos[n] for n in nodes])
 sos_distances(assemblage, tree, nodes; nsims = 100, method = :tipshuffle) =
     _sos_distances(reduce(hcat, process_node(assemblage, tree, node; nsims, method)[1] for node in nodes))
