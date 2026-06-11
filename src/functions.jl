@@ -155,14 +155,22 @@ function calculate_SOS(sims)
     (sims[1, :] .- me) ./ sd
 end
 
-# Geographic node divergence (GND metric) from a simulation matrix.
+# Geographic node divergence (GND metric) from a simulation matrix. Summarised over
+# OCCUPIED sites only (Borregaard et al. 2014): a cell where the clade is absent has
+# identical richness in every simulation (a constant column) and carries no
+# divergence signal. Including such cells dilutes GND toward 0 by a factor that
+# scales with the fraction of empty cells, so it deflates GND on finer grids - drop
+# the constant columns before averaging.
 function calculate_GND(sims)
   # two internal convenience functions
   logit(p) = log(p/(1-p))
   invlogit(p) = exp(p)/(1+exp(p))
 
   n = size(sims, 1)
-  r = [tiedrank(x)[1]/(n + 1) for x in eachcol(sims)]
+  occupied = Iterators.filter(x -> !all(==(first(x)), x), eachcol(sims))
+  r = [tiedrank(x)[1]/(n + 1) for x in occupied]
+  isempty(r) && return NaN
+  # two-sided P (eqn 3); the -1/n keeps P off the 0/1 boundary so logit stays finite
   p = 1 .- 2 .* abs.(r .- 0.5) .- 1/n
   α = mean(logit.(p))
   1-invlogit(α)
