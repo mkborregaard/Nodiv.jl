@@ -11,7 +11,7 @@ using Phylo
 using RecipesBase
 using Random: rand!
 using Statistics
-using StatsBase: tiedrank, sample
+using StatsBase: tiedrank
 using ProgressLogging
 
 # All tips/species descending from a node (or the node itself if it is a tip).
@@ -54,9 +54,9 @@ end
     # is recomputed here (a fresh randomization, so the panel varies between calls).
     sos = if length(pn.args) >= 4
         cached = pn.args[4]
-        cached isa NodeAnalysis ? cached.sos[node] : cached
+        cached isa Union{NodeAnalysis, NodeMetrics} ? cached.sos[node] : cached
     else
-        calculate_SOS(simulate_descendants(assm, tree, ch1; method = :tipshuffle, nsims = 1000))
+        calculate_SOS(simulate_descendants(assm, tree, ch1; nsims = 1000))
     end
 
     layout := (2, 2)
@@ -95,7 +95,7 @@ end
 
 @recipe function f(pg::Plot_Gnd)
     tree, gndvals = pg.args
-    gndvals isa NodeAnalysis && (gndvals = gndvals.gnd)
+    gndvals isa Union{NodeAnalysis, NodeMetrics} && (gndvals = gndvals.gnd)
     shown = Dict(k => v for (k, v) in gndvals if !isnan(v))
 
     # The tree recipe draws a marker at every node and renders NaN-marker_z nodes
@@ -114,36 +114,19 @@ end
     tree
 end
 
-# Build a sampling distribution of a descendant clade's per-site richness.
-#
-# :swap       - curveball randomization of the clade's presence/absence matrix
-#               (keeps species ranges and site richness constant), then recompute
-#               the descendant's richness. The published null model.
-# :tipshuffle - keep the presence/absence matrix intact and randomize only which
-#               species belong to the focal descendant, holding the descendant's
-#               species count fixed. Much faster, as it avoids matrix swapping.
-function simulate_descendants(clade, tree, descendant; method = :swap, nsims = 99)
+# Build a sampling distribution of a descendant clade's per-site richness under the
+# published null model: curveball (swap) randomization of the parent clade's
+# presence/absence matrix, holding each species' range size and each site's richness
+# constant, then recompute the descendant clade's richness. Fixing range size is what
+# makes the divergence "spatial" - a uniform richness asymmetry between the two
+# descendants is not flagged, only differences in WHERE they occur.
+function simulate_descendants(clade, tree, descendant; nsims = 99)
     ret = zeros(nsims + 1, nsites(clade))  # a matrix to hold the richness values from the simulations
-    # the empirical richness in the first row
-    ret[1, :] = richness(get_clade(clade, tree, descendant))
-    if method == :swap
-        rmg = matrixrandomizer(clade)
-        for i in 2:nsims + 1
-            # and simulated richness in the rest of the nsims rows
-            ret[i, :] .= richness(get_clade(rand!(rmg), tree, descendant))
-        end
-    elseif method == :tipshuffle
-        # Materialize the clade once so the per-sim views are single-level (a
-        # nested view of a view would not hit SpatialEcology's colsum method).
-        cl = Assemblage(clade)
-        nclade = nspecies(cl)
-        ndesc = nspecies(get_clade(cl, tree, descendant))
-        for i in 2:nsims + 1
-            # draw a random set of `ndesc` species and take their per-site richness
-            ret[i, :] .= richness(view(cl, species = sample(1:nclade, ndesc; replace = false)))
-        end
-    else
-        error("unrecognized method")
+    ret[1, :] = richness(get_clade(clade, tree, descendant))   # empirical richness in the first row
+    rmg = matrixrandomizer(clade)
+    for i in 2:nsims + 1
+        # simulated richness in the remaining rows
+        ret[i, :] .= richness(get_clade(rand!(rmg), tree, descendant))
     end
     ret
 end
@@ -176,8 +159,61 @@ function calculate_GND(sims)
   1-invlogit(α)
 end
 
+# ---- effect-size alternatives to GND -----------------------------------------
+# GND (eqn 4) combines per-cell two-sided P values in logit space. That makes it a
+# p-value summary, not an effect size: its scale rides on `nsims` (P is bounded by
+# ~1/nsims, so the maximum GND is 1 - O(1/nsims)), its no-divergence baseline is ~0.5
+# rather than 0, and it saturates - the most divergent nodes pile against the ceiling.
+# The functions below summarise the SOS field directly instead, giving a
+# replication-stable magnitude in units of null SDs.
+
+# Total spatial-divergence intensity: the root-mean-square SOS over occupied
+# (non-constant) cells. Each SOS is ~standardised, so this is ~1 under the null and
+# >1 under divergence. Replication-stable and not dominated by boundary cells. NB:
+# under a null that does not fix per-clade range size (e.g. :tipshuffle), this also
+# responds to a uniform richness/occupancy asymmetry between the clades; use
+# `calculate_GND_spatial` to strip that out, or the :swap null which fixes range size.
+function calculate_GND_rms(sims)
+    sd = std.(eachcol(sims)); me = mean.(eachcol(sims))
+    sos = (sims[1, :] .- me) ./ sd
+    keep = isfinite.(sos)                 # drops constant columns (sd = 0 -> NaN/Inf)
+    any(keep) ? sqrt(mean(abs2, sos[keep])) : NaN
+end
+
+# Spatial-only intensity: as `calculate_GND_rms` but with the uniform offset
+# (mean SOS = the clades' richness/occupancy asymmetry) removed, so it reflects only
+# how over/under-representation varies ACROSS cells. Equals the SD of the SOS field.
+function calculate_GND_spatial(sims)
+    sd = std.(eachcol(sims)); me = mean.(eachcol(sims))
+    sos = (sims[1, :] .- me) ./ sd
+    keep = isfinite.(sos)
+    any(keep) ? std(sos[keep]) : NaN
+end
+
+# Standardised effect size of the divergence: the mean-square-SOS statistic of the
+# empirical row, expressed in SDs of its null distribution (the simulated rows scored
+# against the same per-cell moments). 0 = no divergence; replication-stable scale.
+function calculate_GND_ses(sims)
+    sd = std.(eachcol(sims)); me = mean.(eachcol(sims))
+    keep = sd .> 0
+    any(keep) || return NaN
+    mek = me[keep]; sdk = sd[keep]
+    msos(row) = (z = (row[keep] .- mek) ./ sdk; mean(abs2, z))
+    Temp = msos(view(sims, 1, :))
+    Tnull = [msos(view(sims, i, :)) for i in 2:size(sims, 1)]
+    s = std(Tnull)
+    s == 0 ? NaN : (Temp - mean(Tnull)) / s
+end
+
+# Same summaries from an already-computed per-cell SOS vector (e.g. a cached
+# `NodeAnalysis.sos[node]`), so they can be derived without re-running the null.
+# NaN/Inf cells (clade absent / constant) are dropped. `gnd_rms` = total intensity,
+# `gnd_spatial` = spatial-only. The SES needs the null draws, so it has no SOS-only form.
+gnd_rms(sos::AbstractVector)     = (f = filter(isfinite, sos); isempty(f) ? NaN : sqrt(mean(abs2, f)))
+gnd_spatial(sos::AbstractVector) = (f = filter(isfinite, sos); isempty(f) ? NaN : std(f))
+
 # Calculate SOS and GND for a single node (NaN when the node can't be analysed).
-function process_node(assemblage, tree, nodename; nsims = 100, method = :swap)
+function process_node(assemblage, tree, nodename; nsims = 100)
     clade = get_clade(assemblage, tree, nodename)
     children = getchildren(tree, nodename)
 
@@ -185,38 +221,75 @@ function process_node(assemblage, tree, nodename; nsims = 100, method = :swap)
         return (fill(NaN, nsites(clade)), NaN)
     end
 
-    sims = simulate_descendants(clade, tree, children[1]; nsims, method)
+    sims = simulate_descendants(clade, tree, children[1]; nsims)
     calculate_SOS(sims), calculate_GND(sims)
 end
 
 # Run the node-based analysis over every internal node of the tree.
 # Recreates the main `Node_analysis` function of the nodiv R package
 # (https://github.com/mkborregaard/nodiv).
-function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100, method = :swap)
+function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100)
    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)] #shuffle!(collect(nodenamefilter(!isleaf, tree)))
    SOSs = Matrix{Float64}(undef, nsites(assemblage), length(nodevec))
    GNDs = Vector{Float64}(undef, length(nodevec))
    @progress for (i, node) in enumerate(nodevec)
-       SOSs[:,i], GNDs[i] = process_node(assemblage, tree, node; nsims, method)
+       SOSs[:,i], GNDs[i] = process_node(assemblage, tree, node; nsims)
    end
    SOSs, GNDs
 end
 
 # Compute both the per-cell SOS pattern and the GND for every internal node in a
 # single pass (the SOS is calculated anyway when getting GND, so this avoids
-# recomputing it later). Returns a `NodeAnalysis` to hand to the explore
-# functions. Defaults to the :tipshuffle null. The "compute once, explore a lot"
-# entry point - cache the result (e.g. with JLD2) and reload it.
-function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100, method = :tipshuffle)
+# recomputing it later). Returns a `NodeAnalysis` to hand to the explore functions.
+# The "compute once, explore a lot" entry point - cache the result (e.g. with JLD2)
+# and reload it. See `node_metrics` for the effect-size scores (RMS/spatial/SES).
+function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100)
     nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
     gnd = Dict{String, Float64}()
     sos = Dict{String, Vector{Float64}}()
     @progress for node in nodevec
-        s, g = process_node(assemblage, tree, node; nsims, method)
+        s, g = process_node(assemblage, tree, node; nsims)
         gnd[node] = g
         isnan(g) || (sos[node] = s)
     end
     NodeAnalysis(gnd, sos)
+end
+
+# Like `NodeAnalysis`, but also carries the effect-size scores: `rms` (total
+# intensity), `spatial` (spatial-only), and `ses` (standardised effect size). Kept
+# separate from `NodeAnalysis` so existing cached results still load unchanged.
+struct NodeMetrics
+    gnd::Dict{String, Float64}
+    rms::Dict{String, Float64}
+    spatial::Dict{String, Float64}
+    ses::Dict{String, Float64}
+    sos::Dict{String, Vector{Float64}}
+end
+
+# One-pass analysis returning GND together with the effect-size alternatives, all
+# from the same null draws (one randomisation per node). The published swap null
+# fixes range size, so the `spatial`/GND scores measure spatial turnover rather than
+# richness asymmetry. Cache the result with JLD2 as for `node_analysis`.
+function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims = 100)
+    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
+    gnd = Dict{String, Float64}(); rms = Dict{String, Float64}()
+    spatial = Dict{String, Float64}(); ses = Dict{String, Float64}()
+    sos = Dict{String, Vector{Float64}}()
+    @progress for node in nodevec
+        clade = get_clade(assemblage, tree, node)
+        children = getchildren(tree, node)
+        if length(children) != 2 || any(x -> isleaf(tree, x) || nspecies(get_clade(assemblage, tree, x)) < 4, children)
+            gnd[node] = NaN
+            continue
+        end
+        sims = simulate_descendants(clade, tree, children[1]; nsims)
+        gnd[node]     = calculate_GND(sims)
+        rms[node]     = calculate_GND_rms(sims)
+        spatial[node] = calculate_GND_spatial(sims)
+        ses[node]     = calculate_GND_ses(sims)
+        sos[node]     = calculate_SOS(sims)
+    end
+    NodeMetrics(gnd, rms, spatial, ses, sos)
 end
 
 # Prune `tree` in place to the tips it shares with all the given assemblage(s),
@@ -233,6 +306,7 @@ end
 divergent_nodes(gnd::AbstractDict; threshold = 0.8) =
     [node for (node, g) in gnd if !isnan(g) && g > threshold]
 divergent_nodes(res::NodeAnalysis; threshold = 0.8) = divergent_nodes(res.gnd; threshold)
+divergent_nodes(res::NodeMetrics; threshold = 0.8) = divergent_nodes(res.gnd; threshold)
 
 # Pairwise distance matrix (1 - |Pearson r|) between per-cell SOS patterns,
 # correlated over cells where both patterns are defined (SOS is NaN where a clade
@@ -252,5 +326,6 @@ function _sos_distances(sosmat)
 end
 sos_distances(sosvectors::AbstractVector) = _sos_distances(reduce(hcat, sosvectors))
 sos_distances(res::NodeAnalysis, nodes) = sos_distances([res.sos[n] for n in nodes])
-sos_distances(assemblage, tree, nodes; nsims = 100, method = :tipshuffle) =
-    _sos_distances(reduce(hcat, process_node(assemblage, tree, node; nsims, method)[1] for node in nodes))
+sos_distances(res::NodeMetrics, nodes) = sos_distances([res.sos[n] for n in nodes])
+sos_distances(assemblage, tree, nodes; nsims = 100) =
+    _sos_distances(reduce(hcat, process_node(assemblage, tree, node; nsims)[1] for node in nodes))
