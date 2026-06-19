@@ -120,7 +120,7 @@ end
 # constant, then recompute the descendant clade's richness. Fixing range size is what
 # makes the divergence "spatial" - a uniform richness asymmetry between the two
 # descendants is not flagged, only differences in WHERE they occur.
-function simulate_descendants(clade, tree, descendant; nsims = 99)
+function simulate_descendants(clade, tree, descendant; nsims = 200)
     ret = zeros(nsims + 1, nsites(clade))  # a matrix to hold the richness values from the simulations
     ret[1, :] = richness(get_clade(clade, tree, descendant))   # empirical richness in the first row
     rmg = matrixrandomizer(clade)
@@ -237,7 +237,7 @@ gnd_rms(sos::AbstractVector)     = (f = filter(isfinite, sos); isempty(f) ? NaN 
 gnd_spatial(sos::AbstractVector) = (f = filter(isfinite, sos); isempty(f) ? NaN : std(f))
 
 # Calculate SOS and GND for a single node (NaN when the node can't be analysed).
-function process_node(assemblage, tree, nodename; nsims = 100)
+function process_node(assemblage, tree, nodename; nsims = 200)
     clade = get_clade(assemblage, tree, nodename)
     children = getchildren(tree, nodename)
 
@@ -253,7 +253,7 @@ end
 # Run the node-based analysis over every internal node of the tree.
 # Recreates the main `Node_analysis` function of the nodiv R package
 # (https://github.com/mkborregaard/nodiv).
-function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100)
+function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)] #shuffle!(collect(nodenamefilter(!isleaf, tree)))
    SOSs = Matrix{Float64}(undef, nsites(assemblage), length(nodevec))
    GNDs = Vector{Float64}(undef, length(nodevec))
@@ -268,7 +268,7 @@ end
 # recomputing it later). Returns a `NodeAnalysis` to hand to the explore functions.
 # The "compute once, explore a lot" entry point - cache the result (e.g. with JLD2)
 # and reload it. See `node_metrics` for the effect-size scores (RMS/spatial/SES).
-function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100)
+function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
     nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
     gnd = Dict{String, Float64}()
     sos = Dict{String, Vector{Float64}}()
@@ -297,7 +297,7 @@ end
 # from the same null draws (one randomisation per node). The published swap null
 # fixes range size, so the `spatial`/GND scores measure spatial turnover rather than
 # richness asymmetry. Cache the result with JLD2 as for `node_analysis`.
-function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims = 100)
+function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
     nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
     gnd = Dict{String, Float64}(); rms = Dict{String, Float64}()
     spatial = Dict{String, Float64}(); ses = Dict{String, Float64}()
@@ -384,5 +384,5 @@ end
 sos_distances(sosvectors::AbstractVector) = _sos_distances(reduce(hcat, sosvectors))
 sos_distances(res::NodeAnalysis, nodes) = sos_distances([res.sos[n] for n in nodes])
 sos_distances(res::NodeMetrics, nodes) = sos_distances([res.sos[n] for n in nodes])
-sos_distances(assemblage, tree, nodes; nsims = 100) =
+sos_distances(assemblage, tree, nodes; nsims = 200) =
     _sos_distances(reduce(hcat, process_node(assemblage, tree, node; nsims)[1] for node in nodes))
