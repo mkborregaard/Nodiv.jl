@@ -121,12 +121,19 @@ end
 # makes the divergence "spatial" - a uniform richness asymmetry between the two
 # descendants is not flagged, only differences in WHERE they occur.
 function simulate_descendants(clade, tree, descendant; nsims = 200)
-    ret = zeros(nsims + 1, nsites(clade))  # a matrix to hold the richness values from the simulations
-    ret[1, :] = richness(get_clade(clade, tree, descendant))   # empirical richness in the first row
+    _simulate_descendants(clade, nodespecies(tree, descendant); nsims)
+end
+
+# Core sampler: the descendant is given as a precomputed species-name vector, so the
+# hot loop touches no tree functions. That keeps it thread-safe (the parallel path in
+# `node_metrics` does all tree access up front) and avoids recomputing the descendant
+# species set on every one of the `nsims` draws.
+function _simulate_descendants(clade, descsp::Vector{String}; nsims = 200)
+    ret = zeros(nsims + 1, nsites(clade))                      # richness values from the draws
+    ret[1, :] = richness(view(clade, species = descsp))        # empirical richness in row 1
     rmg = matrixrandomizer(clade)
     for i in 2:nsims + 1
-        # simulated richness in the remaining rows
-        ret[i, :] .= richness(get_clade(rand!(rmg), tree, descendant))
+        ret[i, :] .= richness(view(rand!(rmg), species = descsp))   # simulated richness
     end
     ret
 end
@@ -297,26 +304,56 @@ end
 # from the same null draws (one randomisation per node). The published swap null
 # fixes range size, so the `spatial`/GND scores measure spatial turnover rather than
 # richness asymmetry. Cache the result with JLD2 as for `node_analysis`.
+#
+# Multithreaded: the per-node swap randomisation dominates the cost and is independent
+# across nodes, so start Julia with `-t auto` (or set JULIA_NUM_THREADS) for a near-
+# linear speedup. All tree access is done in a serial pre-pass; the parallel section
+# only reads the assemblage and builds thread-local randomisers. Results carry the
+# usual Monte-Carlo noise and are not bit-reproducible across runs (true single-thread
+# too, as nothing is seeded).
 function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
     nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
+    N = length(nodevec)
+
+    # serial pre-pass: everything that touches the tree (not thread-safe to share)
+    analysable = falses(N)
+    parentsp = Vector{Vector{String}}(undef, N)   # focal clade species
+    descsp   = Vector{Vector{String}}(undef, N)   # first descendant's species
+    for (i, node) in enumerate(nodevec)
+        ch = getchildren(tree, node)
+        if length(ch) == 2 && all(x -> !isleaf(tree, x) && nspecies(get_clade(assemblage, tree, x)) >= 3, ch)
+            analysable[i] = true
+            parentsp[i] = nodespecies(tree, node)
+            descsp[i]   = nodespecies(tree, ch[1])
+        end
+    end
+
+    # parallel heavy pass: only assemblage reads + thread-local randomisers
+    gndv = fill(NaN, N); rmsv = fill(NaN, N); spatv = fill(NaN, N)
+    sesv = fill(NaN, N); pvalv = fill(NaN, N)
+    sosv = Vector{Vector{Float64}}(undef, N)
+    done = Threads.Atomic{Int}(0); total = count(analysable)
+    Threads.@threads :dynamic for i in 1:N
+        analysable[i] || continue
+        clade = view(assemblage, species = parentsp[i])
+        occ = richness(clade) .> 0                        # focal clade's occupied cells
+        sims = _simulate_descendants(clade, descsp[i]; nsims)
+        gndv[i]  = calculate_GND(sims, occ);     rmsv[i]  = calculate_GND_rms(sims, occ)
+        spatv[i] = calculate_GND_spatial(sims, occ); sesv[i] = calculate_GND_ses(sims, occ)
+        pvalv[i] = calculate_GND_pval(sims, occ);    sosv[i] = calculate_SOS(sims)
+        n = Threads.atomic_add!(done, 1) + 1
+        n % 100 == 0 && @info "node_metrics: $n / $total analysable nodes done"
+    end
+
+    # assemble the result dicts (serial)
     gnd = Dict{String, Float64}(); rms = Dict{String, Float64}()
     spatial = Dict{String, Float64}(); ses = Dict{String, Float64}()
     pval = Dict{String, Float64}(); sos = Dict{String, Vector{Float64}}()
-    @progress for node in nodevec
-        clade = get_clade(assemblage, tree, node)
-        children = getchildren(tree, node)
-        if length(children) != 2 || any(x -> isleaf(tree, x) || nspecies(get_clade(assemblage, tree, x)) < 3, children)
-            gnd[node] = NaN
-            continue
-        end
-        occ = richness(clade) .> 0          # focal clade's occupied cells (deterministic)
-        sims = simulate_descendants(clade, tree, children[1]; nsims)
-        gnd[node]     = calculate_GND(sims, occ)
-        rms[node]     = calculate_GND_rms(sims, occ)
-        spatial[node] = calculate_GND_spatial(sims, occ)
-        ses[node]     = calculate_GND_ses(sims, occ)
-        pval[node]    = calculate_GND_pval(sims, occ)
-        sos[node]     = calculate_SOS(sims)
+    for i in 1:N
+        gnd[nodevec[i]] = gndv[i]
+        analysable[i] || continue
+        rms[nodevec[i]] = rmsv[i]; spatial[nodevec[i]] = spatv[i]; ses[nodevec[i]] = sesv[i]
+        pval[nodevec[i]] = pvalv[i]; sos[nodevec[i]] = sosv[i]
     end
     NodeMetrics(gnd, rms, spatial, ses, pval, sos)
 end
