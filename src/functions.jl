@@ -49,15 +49,15 @@ end
     assmch1 = get_clade(assm, tree, ch1)
     assmch2 = get_clade(assm, tree, ch2)
 
-    # SOS for the top-right panel. A 4th argument supplies a cached SOS - either a
-    # `NodeAnalysis` (looked up by node) or a precomputed SOS vector; otherwise it
-    # is recomputed here (a fresh randomization, so the panel varies between calls).
-    sos = if length(pn.args) >= 4
-        cached = pn.args[4]
-        cached isa Union{NodeAnalysis, NodeMetrics} ? cached.sos[node] : cached
-    else
-        calculate_SOS(simulate_descendants(assm, tree, ch1; nsims = 1000))
-    end
+    # SOS for the top-right panel, taken from the cached analysis result supplied as
+    # the 4th argument - either a `NodeAnalysis`/`NodeMetrics` (looked up by node) or a
+    # precomputed SOS vector. Pass the result of `node_metrics`/`node_analysis`; the
+    # panel is never recomputed on the fly.
+    length(pn.args) >= 4 ||
+        error("plot_node needs the analysis result (or a precomputed SOS vector) as the " *
+              "4th argument, e.g. plot_node(assemblage, tree, node, res)")
+    cached = pn.args[4]
+    sos = cached isa Union{NodeAnalysis, NodeMetrics} ? cached.sos[node] : cached
 
     layout := (2, 2)
     size --> (900, 800)
@@ -138,21 +138,25 @@ function calculate_SOS(sims)
     (sims[1, :] .- me) ./ sd
 end
 
-# Geographic node divergence (GND metric) from a simulation matrix. Summarised over
-# OCCUPIED sites only (Borregaard et al. 2014): a cell where the clade is absent has
-# identical richness in every simulation (a constant column) and carries no
-# divergence signal. Including such cells dilutes GND toward 0 by a factor that
-# scales with the fraction of empty cells, so it deflates GND on finer grids - drop
-# the constant columns before averaging.
-function calculate_GND(sims)
+# Default occupancy mask when the parent's occupancy is not supplied: cells whose
+# descendant-richness column varies across the draws. The analysis entry points pass
+# the deterministic, nsims-independent "parent clade present" mask instead.
+_occupied(sims) = [!all(==(first(c)), c) for c in eachcol(sims)]
+
+# Geographic node divergence (GND metric) from a simulation matrix, averaged over the
+# OCCUPIED sites of the focal (parent) clade (Borregaard et al. 2014). Cells where the
+# parent is absent carry no divergence signal and are excluded; a constant occupied
+# column (descendant richness fixed across draws) contributes P ~ 1, i.e. no
+# divergence. `occupied` is a per-cell boolean mask (default: the non-constant columns).
+function calculate_GND(sims, occupied = _occupied(sims))
   # two internal convenience functions
   logit(p) = log(p/(1-p))
   invlogit(p) = exp(p)/(1+exp(p))
 
   n = size(sims, 1)
-  occupied = Iterators.filter(x -> !all(==(first(x)), x), eachcol(sims))
-  r = [tiedrank(x)[1]/(n + 1) for x in occupied]
-  isempty(r) && return NaN
+  idx = findall(occupied)
+  isempty(idx) && return NaN
+  r = [tiedrank(view(sims, :, j))[1]/(n + 1) for j in idx]
   # two-sided P (eqn 3); the -1/n keeps P off the 0/1 boundary so logit stays finite
   p = 1 .- 2 .* abs.(r .- 0.5) .- 1/n
   α = mean(logit.(p))
@@ -167,48 +171,68 @@ end
 # The functions below summarise the SOS field directly instead, giving a
 # replication-stable magnitude in units of null SDs.
 
-# Total spatial-divergence intensity: the root-mean-square SOS over occupied
-# (non-constant) cells. Each SOS is ~standardised, so this is ~1 under the null and
-# >1 under divergence. Replication-stable and not dominated by boundary cells. NB:
-# under a null that does not fix per-clade range size (e.g. :tipshuffle), this also
-# responds to a uniform richness/occupancy asymmetry between the clades; use
-# `calculate_GND_spatial` to strip that out, or the :swap null which fixes range size.
-function calculate_GND_rms(sims)
+# Total spatial-divergence intensity: the root-mean-square SOS over the focal clade's
+# occupied cells. Each SOS is ~standardised, so this is ~1 under the null and >1 under
+# divergence. Replication-stable and not dominated by boundary cells. Constant occupied
+# cells (sd = 0) contribute 0. Under the swap null, which fixes range size, a uniform
+# richness/occupancy asymmetry between the clades is not flagged (use
+# `calculate_GND_spatial` if you ever need to strip an offset explicitly).
+function calculate_GND_rms(sims, occupied = _occupied(sims))
     sd = std.(eachcol(sims)); me = mean.(eachcol(sims))
     sos = (sims[1, :] .- me) ./ sd
-    keep = isfinite.(sos)                 # drops constant columns (sd = 0 -> NaN/Inf)
-    any(keep) ? sqrt(mean(abs2, sos[keep])) : NaN
+    idx = findall(occupied)
+    isempty(idx) && return NaN
+    sqrt(mean(j -> isfinite(sos[j]) ? sos[j]^2 : 0.0, idx))
 end
 
 # Spatial-only intensity: as `calculate_GND_rms` but with the uniform offset
 # (mean SOS = the clades' richness/occupancy asymmetry) removed, so it reflects only
 # how over/under-representation varies ACROSS cells. Equals the SD of the SOS field.
-function calculate_GND_spatial(sims)
+function calculate_GND_spatial(sims, occupied = _occupied(sims))
     sd = std.(eachcol(sims)); me = mean.(eachcol(sims))
     sos = (sims[1, :] .- me) ./ sd
-    keep = isfinite.(sos)
-    any(keep) ? std(sos[keep]) : NaN
+    idx = findall(occupied)
+    isempty(idx) && return NaN
+    std([isfinite(sos[j]) ? sos[j] : 0.0 for j in idx])
+end
+
+# Mean-square-SOS statistic of a richness row, standardised against the per-cell null
+# moments, over occupied cells that actually vary. Internal helper for the SES and the
+# Monte-Carlo P value, which share the null distribution of this statistic.
+function _msos_null(sims, occupied)
+    sd = std.(eachcol(sims)); me = mean.(eachcol(sims))
+    keep = occupied .& (sd .> 0)
+    any(keep) || return (NaN, Float64[])
+    mek = me[keep]; sdk = sd[keep]
+    msos(row) = (z = (view(row, keep) .- mek) ./ sdk; mean(abs2, z))
+    msos(view(sims, 1, :)), [msos(view(sims, i, :)) for i in 2:size(sims, 1)]
 end
 
 # Standardised effect size of the divergence: the mean-square-SOS statistic of the
-# empirical row, expressed in SDs of its null distribution (the simulated rows scored
-# against the same per-cell moments). 0 = no divergence; replication-stable scale.
-function calculate_GND_ses(sims)
-    sd = std.(eachcol(sims)); me = mean.(eachcol(sims))
-    keep = sd .> 0
-    any(keep) || return NaN
-    mek = me[keep]; sdk = sd[keep]
-    msos(row) = (z = (row[keep] .- mek) ./ sdk; mean(abs2, z))
-    Temp = msos(view(sims, 1, :))
-    Tnull = [msos(view(sims, i, :)) for i in 2:size(sims, 1)]
+# empirical row, expressed in SDs of its null distribution. 0 = no divergence;
+# replication-stable. NB the SES magnitude inflates with clade size (more cells ->
+# tighter null), so prefer RMS-SOS for cross-node / cross-grain comparison.
+function calculate_GND_ses(sims, occupied = _occupied(sims))
+    Temp, Tnull = _msos_null(sims, occupied)
+    isempty(Tnull) && return NaN
     s = std(Tnull)
     s == 0 ? NaN : (Temp - mean(Tnull)) / s
+end
+
+# Null-calibrated significance: the one-sided Monte-Carlo P value of the mean-square-
+# SOS statistic (add-one estimator, bounded by 1/(nsims+1)). Small = divergent. NB this
+# is a significance, so it carries a clade-size/power bias - larger clades clear a fixed
+# P threshold more easily; `calculate_GND_rms` does not.
+function calculate_GND_pval(sims, occupied = _occupied(sims))
+    Temp, Tnull = _msos_null(sims, occupied)
+    isempty(Tnull) && return NaN
+    (1 + count(>=(Temp), Tnull)) / (length(Tnull) + 1)
 end
 
 # Same summaries from an already-computed per-cell SOS vector (e.g. a cached
 # `NodeAnalysis.sos[node]`), so they can be derived without re-running the null.
 # NaN/Inf cells (clade absent / constant) are dropped. `gnd_rms` = total intensity,
-# `gnd_spatial` = spatial-only. The SES needs the null draws, so it has no SOS-only form.
+# `gnd_spatial` = spatial-only. The SES/P value need the null draws, so have no SOS-only form.
 gnd_rms(sos::AbstractVector)     = (f = filter(isfinite, sos); isempty(f) ? NaN : sqrt(mean(abs2, f)))
 gnd_spatial(sos::AbstractVector) = (f = filter(isfinite, sos); isempty(f) ? NaN : std(f))
 
@@ -217,12 +241,13 @@ function process_node(assemblage, tree, nodename; nsims = 100)
     clade = get_clade(assemblage, tree, nodename)
     children = getchildren(tree, nodename)
 
-    if length(children) != 2 || any(x -> isleaf(tree, x) || nspecies(get_clade(assemblage, tree, x)) < 4, children)
+    if length(children) != 2 || any(x -> isleaf(tree, x) || nspecies(get_clade(assemblage, tree, x)) < 3, children)
         return (fill(NaN, nsites(clade)), NaN)
     end
 
+    occ = richness(clade) .> 0          # focal clade's occupied cells (deterministic)
     sims = simulate_descendants(clade, tree, children[1]; nsims)
-    calculate_SOS(sims), calculate_GND(sims)
+    calculate_SOS(sims), calculate_GND(sims, occ)
 end
 
 # Run the node-based analysis over every internal node of the tree.
@@ -256,13 +281,15 @@ function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 100)
 end
 
 # Like `NodeAnalysis`, but also carries the effect-size scores: `rms` (total
-# intensity), `spatial` (spatial-only), and `ses` (standardised effect size). Kept
-# separate from `NodeAnalysis` so existing cached results still load unchanged.
+# intensity), `spatial` (spatial-only), `ses` (standardised effect size) and `pval`
+# (null-calibrated Monte-Carlo significance). Kept separate from `NodeAnalysis` so
+# existing cached results still load unchanged.
 struct NodeMetrics
     gnd::Dict{String, Float64}
     rms::Dict{String, Float64}
     spatial::Dict{String, Float64}
     ses::Dict{String, Float64}
+    pval::Dict{String, Float64}
     sos::Dict{String, Vector{Float64}}
 end
 
@@ -274,22 +301,24 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims = 100)
     nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
     gnd = Dict{String, Float64}(); rms = Dict{String, Float64}()
     spatial = Dict{String, Float64}(); ses = Dict{String, Float64}()
-    sos = Dict{String, Vector{Float64}}()
+    pval = Dict{String, Float64}(); sos = Dict{String, Vector{Float64}}()
     @progress for node in nodevec
         clade = get_clade(assemblage, tree, node)
         children = getchildren(tree, node)
-        if length(children) != 2 || any(x -> isleaf(tree, x) || nspecies(get_clade(assemblage, tree, x)) < 4, children)
+        if length(children) != 2 || any(x -> isleaf(tree, x) || nspecies(get_clade(assemblage, tree, x)) < 3, children)
             gnd[node] = NaN
             continue
         end
+        occ = richness(clade) .> 0          # focal clade's occupied cells (deterministic)
         sims = simulate_descendants(clade, tree, children[1]; nsims)
-        gnd[node]     = calculate_GND(sims)
-        rms[node]     = calculate_GND_rms(sims)
-        spatial[node] = calculate_GND_spatial(sims)
-        ses[node]     = calculate_GND_ses(sims)
+        gnd[node]     = calculate_GND(sims, occ)
+        rms[node]     = calculate_GND_rms(sims, occ)
+        spatial[node] = calculate_GND_spatial(sims, occ)
+        ses[node]     = calculate_GND_ses(sims, occ)
+        pval[node]    = calculate_GND_pval(sims, occ)
         sos[node]     = calculate_SOS(sims)
     end
-    NodeMetrics(gnd, rms, spatial, ses, sos)
+    NodeMetrics(gnd, rms, spatial, ses, pval, sos)
 end
 
 # Prune `tree` in place to the tips it shares with all the given assemblage(s),
@@ -306,7 +335,35 @@ end
 divergent_nodes(gnd::AbstractDict; threshold = 0.8) =
     [node for (node, g) in gnd if !isnan(g) && g > threshold]
 divergent_nodes(res::NodeAnalysis; threshold = 0.8) = divergent_nodes(res.gnd; threshold)
-divergent_nodes(res::NodeMetrics; threshold = 0.8) = divergent_nodes(res.gnd; threshold)
+
+# For a `NodeMetrics`, rank divergence by the size-robust RMS-SOS effect size by
+# default (null = 1). Pass `by = :pval` for the null-calibrated Monte-Carlo
+# significance (note: significance carries a clade-size/power bias), or `by = :gnd`
+# for the original GND. The threshold default adapts to the chosen score.
+function divergent_nodes(res::NodeMetrics; by = :rms,
+                         threshold = by == :rms ? 1.5 : by == :pval ? 0.05 : 0.8)
+    if by == :rms
+        [n for (n, v) in res.rms  if !isnan(v) && v > threshold]
+    elseif by == :pval
+        [n for (n, p) in res.pval if !isnan(p) && p < threshold]
+    elseif by == :gnd
+        divergent_nodes(res.gnd; threshold)
+    else
+        error("`by` must be :rms, :pval or :gnd")
+    end
+end
+
+# Size-corrected divergence: RMS-SOS residualised on log clade richness (the clade-size
+# signal is mostly a species-count effect). Positive residual = more divergent than a
+# clade of that size typically is. Returns a Dict node => residual over analysable nodes.
+function size_residual(res::NodeMetrics, tree)
+    nodes = [n for (n, v) in res.rms if !isnan(v)]
+    y = [res.rms[n] for n in nodes]
+    x = [log(length(nodespecies(tree, n))) for n in nodes]
+    X = hcat(ones(length(x)), x)
+    resid = y .- X * (X \ y)
+    Dict(nodes[i] => resid[i] for i in eachindex(nodes))
+end
 
 # Pairwise distance matrix (1 - |Pearson r|) between per-cell SOS patterns,
 # correlated over cells where both patterns are defined (SOS is NaN where a clade
