@@ -270,19 +270,49 @@ function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims =
    SOSs, GNDs
 end
 
-# Compute both the per-cell SOS pattern and the GND for every internal node in a
-# single pass (the SOS is calculated anyway when getting GND, so this avoids
-# recomputing it later). Returns a `NodeAnalysis` to hand to the explore functions.
-# The "compute once, explore a lot" entry point - cache the result (e.g. with JLD2)
-# and reload it. See `node_metrics` for the effect-size scores (RMS/spatial/SES).
-function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
+# Serial pre-pass shared by `node_analysis` and `node_metrics`: everything that touches
+# the tree, which is not safe to share across threads. Returns the internal-node list
+# and, per node, whether it is analysable plus the focal-clade and first-descendant
+# species names, so the parallel heavy pass need only read the assemblage.
+function _analysis_prepass(assemblage, tree)
     nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
-    gnd = Dict{String, Float64}()
-    sos = Dict{String, Vector{Float64}}()
-    @progress for node in nodevec
-        s, g = process_node(assemblage, tree, node; nsims)
-        gnd[node] = g
-        isnan(g) || (sos[node] = s)
+    N = length(nodevec)
+    analysable = falses(N)
+    parentsp = Vector{Vector{String}}(undef, N)   # focal clade species
+    descsp   = Vector{Vector{String}}(undef, N)   # first descendant's species
+    for (i, node) in enumerate(nodevec)
+        ch = getchildren(tree, node)
+        if length(ch) == 2 && all(x -> !isleaf(tree, x) && nspecies(get_clade(assemblage, tree, x)) >= 3, ch)
+            analysable[i] = true
+            parentsp[i] = nodespecies(tree, node)
+            descsp[i]   = nodespecies(tree, ch[1])
+        end
+    end
+    nodevec, analysable, parentsp, descsp
+end
+
+# Compute the per-cell SOS pattern and the GND for every internal node. Returns a
+# `NodeAnalysis` to hand to the explore functions - the "compute once, explore a lot"
+# entry point; cache it (e.g. with JLD2) and reload it. See `node_metrics` for the
+# effect-size scores (RMS/spatial/SES/pval). Multithreaded like `node_metrics`: launch
+# Julia with `-t auto` for the speedup.
+function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
+    nodevec, analysable, parentsp, descsp = _analysis_prepass(assemblage, tree)
+    N = length(nodevec)
+    gndv = fill(NaN, N)
+    sosv = Vector{Vector{Float64}}(undef, N)
+    Threads.@threads :dynamic for i in 1:N
+        analysable[i] || continue
+        clade = view(assemblage, species = parentsp[i])
+        occ = richness(clade) .> 0
+        sims = _simulate_descendants(clade, descsp[i]; nsims)
+        gndv[i] = calculate_GND(sims, occ)
+        sosv[i] = calculate_SOS(sims)
+    end
+    gnd = Dict{String, Float64}(); sos = Dict{String, Vector{Float64}}()
+    for i in 1:N
+        gnd[nodevec[i]] = gndv[i]
+        analysable[i] && (sos[nodevec[i]] = sosv[i])
     end
     NodeAnalysis(gnd, sos)
 end
@@ -312,21 +342,8 @@ end
 # usual Monte-Carlo noise and are not bit-reproducible across runs (true single-thread
 # too, as nothing is seeded).
 function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
-    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
+    nodevec, analysable, parentsp, descsp = _analysis_prepass(assemblage, tree)
     N = length(nodevec)
-
-    # serial pre-pass: everything that touches the tree (not thread-safe to share)
-    analysable = falses(N)
-    parentsp = Vector{Vector{String}}(undef, N)   # focal clade species
-    descsp   = Vector{Vector{String}}(undef, N)   # first descendant's species
-    for (i, node) in enumerate(nodevec)
-        ch = getchildren(tree, node)
-        if length(ch) == 2 && all(x -> !isleaf(tree, x) && nspecies(get_clade(assemblage, tree, x)) >= 3, ch)
-            analysable[i] = true
-            parentsp[i] = nodespecies(tree, node)
-            descsp[i]   = nodespecies(tree, ch[1])
-        end
-    end
 
     # parallel heavy pass: only assemblage reads + thread-local randomisers
     gndv = fill(NaN, N); rmsv = fill(NaN, N); spatv = fill(NaN, N)
