@@ -1,6 +1,7 @@
 # Nodiv
 
 [![Build Status](https://github.com/mkborregaard/Nodiv.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/mkborregaard/Nodiv.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/mkborregaard/Nodiv.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/mkborregaard/Nodiv.jl)
 
 Node-based analysis of species distributions — a Julia implementation of the method in
 Borregaard et al. (2014, *Methods in Ecology and Evolution* 5: 1225–1235). For every
