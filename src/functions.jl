@@ -411,18 +411,6 @@ function divergent_nodes(res::NodeMetrics; by = :rms,
     end
 end
 
-# Size-corrected divergence: RMS-SOS residualised on log clade richness (the clade-size
-# signal is mostly a species-count effect). Positive residual = more divergent than a
-# clade of that size typically is. Returns a Dict node => residual over analysable nodes.
-function size_residual(res::NodeMetrics, tree)
-    nodes = [n for (n, v) in res.rms if !isnan(v)]
-    y = [res.rms[n] for n in nodes]
-    x = [log(length(nodespecies(tree, n))) for n in nodes]
-    X = hcat(ones(length(x)), x)
-    resid = y .- X * (X \ y)
-    Dict(nodes[i] => resid[i] for i in eachindex(nodes))
-end
-
 # Pairwise distance matrix between per-cell SOS patterns, for grouping nodes by SOS-map
 # similarity (see docs/sos_pattern_grouping_design.md). D(k,l) = 1 - |r|, with r the
 # correlation of the two SOS vectors over the cells where BOTH are finite. That shared-finite

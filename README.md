@@ -37,7 +37,3 @@ res.sos["Node 123"]                     # per-cell SOS map for a node
   that GND is a logit-mean of per-cell *p*-values rather than an effect size: its
   no-divergence baseline is ≈ 0.5 (not 0), its maximum is `1 − O(1/nsims)`, and it
   saturates, so the most divergent nodes pile up near the ceiling. Prefer `rms`.
-
-Because divergence tends to scale with clade richness, `size_residual(res, tree)` gives
-RMS-SOS residualised on log species count — "more divergent than expected for a clade
-this size."
