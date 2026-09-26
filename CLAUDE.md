@@ -11,15 +11,16 @@ Package relationships:
 
 ## Running and testing
 
-*(Verify these against the actual repo before relying on them — inferred from standard Julia layout.)*
-- Work in the package env: `julia --project=.`
-- Run the test suite: `julia --project=. -e 'using Pkg; Pkg.test()'` (confirm `test/runtests.jl` exists and passes first).
+- Test deps are in `[extras]`/`[targets]` of `Project.toml` (no `test/Project.toml`); `julia_eval` with `env_path = <root>/test/` activates them, then `include("test/runtests.jl")`.
+- Full run as on CI, with deprecation warnings checked: `julia --project=. -e 'using Pkg; Pkg.test(; julia_args=["--depwarn=yes"])'`.
+- Tests run on a toy assemblage (`test/toydata.jl`) in seconds; they never need the workshop data.
+- Code is BlueStyle, enforced by JuliaFormatter 2.14 (`.JuliaFormatter.toml`, checked in CI by `Format.yml`). Run `JuliaFormatter.format(".")` before committing.
 
 ## Expensive step — do not recompute
 
 The integration check is `NodivWorkshop/script.jl`. It contains one very expensive step: `node_metrics(assemblage, tree; nsims=...)` runs the null-model randomizations over the whole tree (~18k cells for the geographic scan) for both spaces. Its results are cached to the workshop's `data/node_analysis.jld2` as `res_e` and `res_g`.
 
-Do **not** trigger a recompute. Work against the cached `res_e` / `res_g`, which load from that file. If the cache is absent or you think it needs regenerating, ask first — it is a long run.
+Do **not** trigger a recompute casually. Work against the cached `res_e` / `res_g`, which load from that file. The cache is regenerated whenever a change actually invalidates it (e.g. a change to the result types or to how a stored score is defined); say so when a change does, and ask before starting the long run yourself.
 
 ## Constraints
 

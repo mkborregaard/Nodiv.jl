@@ -1,10 +1,12 @@
-# Node-based analysis of species distributions.
-#
-# Extracted from the SpatialEcology.jl docs:
-# https://docs.ecojulia.org/SpatialEcology.jl/stable/examples/nodebased/
-#
-# Reimplements the method of Borregaard et al. (2014), Node-based analysis of
-# species distributions, Methods in Ecology and Evolution 5: 1225-1235.
+"""
+    Nodiv
+
+Node-based analysis of species distributions: the method of Borregaard et al. (2014),
+Node-based analysis of species distributions, *Methods in Ecology and Evolution* 5:
+1225-1235. For every internal node of a phylogeny, the richness of its two descendant
+clades in each cell is compared with a null model that keeps range sizes and cell
+richness. Start with [`node_metrics`](@ref).
+"""
 module Nodiv
 
 using Phylo: Phylo

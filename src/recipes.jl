@@ -1,8 +1,13 @@
-# Plot a node in a 2x2 grid: the parent clade (top-left), the descendant SOS
-# mapped over the assemblage's coordinates (top-right, RdYlBu), and the two child
-# clades on the bottom row. Defined as a plot recipe so the package depends only
-# on RecipesBase; the plotting backend (Plots) is supplied by the caller. Use as
-# `plot_node(assemblage, tree, node)`.
+# Plots recipes. Nodiv depends only on RecipesBase; the caller loads Plots.
+
+"""
+    plot_node(assemblage, tree, node, res)
+
+Plot a node with Plots, in a 2 x 2 grid: the richness of its clade (top left), its SOS
+map (top right), and the richness of its two descendant clades (bottom row). `res` is the
+result of [`node_metrics`](@ref) or [`node_analysis`](@ref), or the node's SOS vector;
+nothing is recomputed.
+"""
 @userplot Plot_Node
 
 @recipe function f(pn::Plot_Node)
@@ -12,10 +17,6 @@
     assmch1 = get_clade(assm, tree, ch1)
     assmch2 = get_clade(assm, tree, ch2)
 
-    # SOS for the top-right panel, taken from the cached analysis result supplied as
-    # the 4th argument - either a `NodeAnalysis`/`NodeMetrics` (looked up by node) or a
-    # precomputed SOS vector. Pass the result of `node_metrics`/`node_analysis`; the
-    # panel is never recomputed on the fly.
     if length(pn.args) < 4
         msg =
             "plot_node needs the analysis result (or a precomputed SOS vector) as " *
@@ -33,7 +34,7 @@
         title := string(node)
         assm
     end
-    @series begin              # top-right: SOS in environmental space
+    @series begin              # top-right: SOS
         subplot := 2
         title := "SOS"
         fillcolor := :RdYlBu
@@ -52,11 +53,16 @@
     end
 end
 
-# Plot per-node values (e.g. GND) on the tree. `gndvals` is a Dict of node name
-# => value; a coloured marker is drawn at every node present in it (NaN values
-# skipped) and nothing elsewhere. Pass a NodeAnalysis (or its `gnd` Dict) to show
-# all analysable nodes, or a filtered Dict (e.g. only divergent nodes) for a subset.
-# Use as `plot_gnd(tree, gnd)`.
+"""
+    plot_gnd(tree, res)
+    plot_gnd(tree, values::AbstractDict)
+
+Plot per-node values on the tree with Plots, as coloured markers: by default the GND of
+the analysed nodes of `res`. Pass a Dict of node name => value instead, e.g.
+`res.rms` or only the divergent nodes, to show other values or a subset. Nodes with no
+value or a `NaN` get no marker. Draws a fan tree coloured `:YlOrRd` over `(0, 1)`;
+`markersize` sets the size of the shown markers.
+"""
 @userplot Plot_Gnd
 
 @recipe function f(pg::Plot_Gnd)

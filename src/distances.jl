@@ -1,26 +1,4 @@
-# Pairwise distance matrix between per-cell SOS patterns, for grouping nodes by SOS-map
-# similarity (see docs/sos_pattern_grouping_design.md). D(k,l) = 1 - |r|, with r the
-# correlation of the two SOS vectors over the cells where BOTH are finite. A finite SOS means
-# the parent clade is present and the null model varies there, the same cells the RMS-SOS
-# is based on. Occupied cells where the null cannot vary (e.g. every species of the parent
-# clade present) have no SOS and are left out; they can be most of a small, sympatric
-# clade's range, so `minoverlap` counts finite cells, not occupied ones. |r| (not r) folds
-# the arbitrary per-node daughter
-# labelling: a mirror-image SOS map is the same divergence geography with the labels swapped.
-#
-# `minoverlap` guards the correlation's own sample size: pairs sharing fewer than `minoverlap`
-# finite cells get D = 1 rather than a correlation fit on a handful of cells. This is what pins
-# disjoint pairs (no shared occupied cells) at the maximum distance. Set it per space - the
-# geographic scan has ~18k cells (a floor of 5-10 is reasonable), the environmental scan only
-# tens of bins, so the floor must be chosen separately for each.
-#
-# `method` selects Pearson (default) or Spearman; Spearman is the robust choice if the marginal
-# SOS distributions are heavy-tailed, as they tend to be at strongly divergent nodes.
-#
-# `overlapweight` is the RETAINED ALTERNATIVE (off by default): it multiplies |r| by a Sorensen
-# index O of the two nodes' occupied cells (D = 1 - O*|r|), so high correlation over a small
-# shared range does not read as full similarity. Occupancy enters ONLY here, never the
-# correlation mask, and must be a genuine `richness(clade) .> 0` mask (supply `assemblage`/`tree`).
+# The distances between the columns of `sosmat`; see `sos_distances`
 function _sos_distances(
     sosmat;
     minoverlap::Integer=3,
@@ -68,6 +46,38 @@ function _occupied_matrix(assemblage, tree, nodes)
     return reduce(hcat, (richness(get_clade(assemblage, tree, n)) .> 0) for n in nodes)
 end
 
+"""
+    sos_distances(res, nodes; minoverlap=3, method=:pearson, overlapweight=false,
+                  assemblage=nothing, tree=nothing) -> Matrix{Float64}
+    sos_distances(sosvectors; minoverlap=3, method=:pearson, overlapweight=false,
+                  occupied=nothing) -> Matrix{Float64}
+
+Pairwise distances between the SOS maps of `nodes`, for grouping nodes by how alike
+their divergence geography is (see `docs/sos_pattern_grouping_design.md`). `res` is the
+result of [`node_metrics`](@ref) or [`node_analysis`](@ref); or pass the SOS vectors
+themselves. The result is symmetric with a zero diagonal, one row and column per node,
+and can be passed to `fit(MDS, D; distances=true)`.
+
+The distance is `1 - |r|`, with `r` the correlation of the two SOS maps over the cells
+where both are defined: where both parent clades are present and the null model varies.
+Using `|r|` makes a mirror image the same pattern, as which daughter is "first" at a node
+is arbitrary. A constant map has no correlation, so distance 1.
+
+# Keywords
+- `minoverlap::Integer=3`: pairs sharing fewer cells with both SOS defined get distance 1
+  rather than a correlation from a handful of cells; this also puts pairs with no shared
+  cells at the maximum. Choose it per space: a floor of about 5-10 cells suits a
+  geographic grid of thousands of cells, a lower one an environmental space of tens of
+  bins. Occupied cells where the null model cannot vary have no SOS and do not count;
+  they can be most of a small, sympatric clade's range.
+- `method::Symbol=:pearson`: or `:spearman`, the robust choice if the SOS values are
+  heavy-tailed, as they tend to be at strongly divergent nodes.
+- `overlapweight::Bool=false`: the retained alternative, `D = 1 - O * |r|`, with `O` the
+  Sørensen index of the two nodes' occupied cells, so a high correlation over a small
+  shared range does not read as full similarity. Occupancy is derived from `assemblage`
+  and `tree` (or given as an `occupied` matrix, one column per node) and enters only here,
+  never the choice of cells for the correlation.
+"""
 function sos_distances(sosvectors::AbstractVector; kw...)
     return _sos_distances(reduce(hcat, sosvectors); kw...)
 end
