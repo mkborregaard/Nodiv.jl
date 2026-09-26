@@ -5,7 +5,8 @@
 #
 # The analysable nodes are those whose two children each have at least three species:
 # the root, X and Y.
-const TOY_NEWICK = "((((a:1,b:1):1,c:2):1,((d:1,e:1):1,f:2):1)X:1," *
+const TOY_NEWICK =
+    "((((a:1,b:1):1,c:2):1,((d:1,e:1):1,f:2):1)X:1," *
     "(((g:1,h:1):1,i:2):1,((j:1,k:1):1,l:2):1)Y:1)root;"
 const TOY_ANALYSABLE = ["root", "X", "Y"]
 

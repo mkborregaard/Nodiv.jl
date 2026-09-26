@@ -4,11 +4,11 @@
 # matching method used by the downstream `view`.
 function nodespecies(tree, node)
     isleaf(tree, node) && return String[getnodename(tree, node)]
-    String[x for x in getdescendants(tree, node) if isleaf(tree, x)]
+    return String[x for x in getdescendants(tree, node) if isleaf(tree, x)]
 end
 
 # Subset an Assemblage to the clade descending from a node.
-get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree, node))
+get_clade(assemblage, tree, node) = view(assemblage; species=nodespecies(tree, node))
 
 # Prune `tree` in place to the tips it shares with all the given assemblage(s),
 # so clade subsetting never references a species absent from the data. Returns
@@ -16,5 +16,5 @@ get_clade(assemblage, tree, node) = view(assemblage, species = nodespecies(tree,
 function prune_to_shared!(tree, assemblages...)
     shared = intersect(getleafnames(tree), speciesnames.(assemblages)...)
     keeptips!(tree, shared)
-    tree
+    return tree
 end

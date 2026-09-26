@@ -45,8 +45,7 @@ end
     @test Set(divergent_nodes(res)) == above(res.rms, 1.5)
     @test Set(divergent_nodes(res; threshold=0)) == Set(TOY_ANALYSABLE)
     @test Set(divergent_nodes(res; by=:gnd)) == above(res.gnd, 0.8)
-    @test Set(divergent_nodes(res; by=:pval)) ==
-        Set(n for (n, p) in res.pval if p < 0.05)
+    @test Set(divergent_nodes(res; by=:pval)) == Set(n for (n, p) in res.pval if p < 0.05)
     @test Set(divergent_nodes(res.gnd; threshold=0.5)) == above(res.gnd, 0.5)
     @test_throws ErrorException divergent_nodes(res; by=:ses)
 

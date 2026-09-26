@@ -3,8 +3,8 @@
 # vector. Pass it straight to the explore functions - `divergent_nodes`,
 # `plot_gnd`, `plot_node`, `sos_distances` - to reuse cached results.
 struct NodeAnalysis
-    gnd::Dict{String, Float64}
-    sos::Dict{String, Vector{Float64}}
+    gnd::Dict{String,Float64}
+    sos::Dict{String,Vector{Float64}}
 end
 
 # Like `NodeAnalysis`, but also carries the effect-size scores: `rms` (total
@@ -12,10 +12,10 @@ end
 # (null-calibrated Monte-Carlo significance). Kept separate from `NodeAnalysis` so
 # existing cached results still load unchanged.
 struct NodeMetrics
-    gnd::Dict{String, Float64}
-    rms::Dict{String, Float64}
-    spatial::Dict{String, Float64}
-    ses::Dict{String, Float64}
-    pval::Dict{String, Float64}
-    sos::Dict{String, Vector{Float64}}
+    gnd::Dict{String,Float64}
+    rms::Dict{String,Float64}
+    spatial::Dict{String,Float64}
+    ses::Dict{String,Float64}
+    pval::Dict{String,Float64}
+    sos::Dict{String,Vector{Float64}}
 end
