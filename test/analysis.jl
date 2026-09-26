@@ -116,3 +116,18 @@ end
     s2, g2 = process_node(assemblage, tree, "root"; nsims=10, rng=Xoshiro(5))
     @test isequal(s1, s2) && g1 == g2
 end
+
+# Empty cells cannot take part in a swap, so they must not slow the null model down: a
+# clade spread thinly over a large grid should mix as well as on its own cells.
+@testset "the null model mixes on a sparse grid" begin
+    for (assemblage, tree) in (toy_data(), sparse_toy_data())
+        clade = get_clade(assemblage, tree, "root")
+        sims = simulate_descendants(clade, tree, "X"; nsims=100, rng=Xoshiro(7))
+        occupied = richness(clade) .> 0
+        draws = sims[2:end, occupied]
+        repeats = count(i -> view(draws, i, :) == view(draws, i - 1, :), 2:size(draws, 1))
+        @test repeats <= 5  # successive draws differ
+        # every occupied cell except the one holding all species varies under the null
+        @test count(c -> length(unique(c)) > 1, eachcol(draws)) == count(occupied) - 1
+    end
+end

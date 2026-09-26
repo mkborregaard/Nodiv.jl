@@ -10,7 +10,7 @@ const TOY_NEWICK =
     "(((g:1,h:1):1,i:2):1,((j:1,k:1):1,l:2):1)Y:1)root;"
 const TOY_ANALYSABLE = ["root", "X", "Y"]
 
-function toy_data()
+function _toy_occurrences()
     rng = Xoshiro(1)
     coords = Float64[repeat(1:6, 5) repeat(1:5; inner=6)]
     west = coords[:, 1] .<= 3
@@ -21,7 +21,24 @@ function toy_data()
     end
     occ[:, 1] .= true
     occ[:, 30] .= false
+    return occ, coords
+end
+
+function toy_data()
+    occ, coords = _toy_occurrences()
     sites = ["s$i" for i in 1:30]
     assemblage = Assemblage(Matrix(occ), coords, sites, string.('a':'l'))
+    return assemblage, parsenewick(TOY_NEWICK)
+end
+
+# The same species and occupied cells, placed in the corner of a 60 x 50 grid whose other
+# 2970 cells are empty, as for a small clade on a large geographic grid
+function sparse_toy_data()
+    occ, coords = _toy_occurrences()
+    rest = [(x, y) for y in 1:50 for x in 1:60 if !(x <= 6 && y <= 5)]
+    allcoords = vcat(coords, Float64[first.(rest) last.(rest)])
+    allocc = hcat(occ, falses(12, length(rest)))
+    sites = ["s$i" for i in 1:size(allcoords, 1)]
+    assemblage = Assemblage(Matrix(allocc), allcoords, sites, string.('a':'l'))
     return assemblage, parsenewick(TOY_NEWICK)
 end
