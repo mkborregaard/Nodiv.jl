@@ -1,10 +1,11 @@
 # Pairwise distance matrix between per-cell SOS patterns, for grouping nodes by SOS-map
 # similarity (see docs/sos_pattern_grouping_design.md). D(k,l) = 1 - |r|, with r the
-# correlation of the two SOS vectors over the cells where BOTH are finite. That shared-finite
-# set is exactly the shared OCCUPIED set: SOS is NaN wherever the parent clade is absent (the
-# std of descendant richness is 0 there), so a finite SOS implies an occupied cell. The only
-# extra cells the finite mask drops are zero-variance cells where SOS is genuinely undefined -
-# correctly excluded from a correlation. |r| (not r) folds the arbitrary per-node daughter
+# correlation of the two SOS vectors over the cells where BOTH are finite. A finite SOS means
+# the parent clade is present and the null model varies there, the same cells the RMS-SOS
+# is based on. Occupied cells where the null cannot vary (e.g. every species of the parent
+# clade present) have no SOS and are left out; they can be most of a small, sympatric
+# clade's range, so `minoverlap` counts finite cells, not occupied ones. |r| (not r) folds
+# the arbitrary per-node daughter
 # labelling: a mirror-image SOS map is the same divergence geography with the labels swapped.
 #
 # `minoverlap` guards the correlation's own sample size: pairs sharing fewer than `minoverlap`
@@ -72,7 +73,7 @@ function sos_distances(sosvectors::AbstractVector; kw...)
 end
 
 function sos_distances(
-    res::Union{NodeAnalysis,NodeMetrics},
+    res::AbstractNodeResult,
     nodes;
     overlapweight::Bool=false,
     assemblage=nothing,

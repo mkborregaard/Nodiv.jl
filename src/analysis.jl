@@ -1,15 +1,24 @@
+# A node can be analysed when it has two children with at least three species each in the
+# assemblage (so neither child is a tip).
+function _isanalysable(assemblage, tree, node)
+    children = getchildren(tree, node)
+    length(children) == 2 || return false
+    return all(children) do child
+        return !isleaf(tree, child) && nspecies(get_clade(assemblage, tree, child)) >= 3
+    end
+end
+
+# The internal nodes in the order of a preorder traversal: the order they appear on the tree
+function _internalnodes(tree)
+    return [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
+end
+
 # Calculate SOS and GND for a single node (NaN when the node can't be analysed).
 function process_node(assemblage, tree, nodename; nsims=200)
     clade = get_clade(assemblage, tree, nodename)
-    children = getchildren(tree, nodename)
-
-    if length(children) != 2 ||
-        any(x -> isleaf(tree, x) || nspecies(get_clade(assemblage, tree, x)) < 3, children)
-        return (fill(NaN, nsites(clade)), NaN)
-    end
-
+    _isanalysable(assemblage, tree, nodename) || return (fill(NaN, nsites(clade)), NaN)
     occ = richness(clade) .> 0          # focal clade's occupied cells (deterministic)
-    sims = simulate_descendants(clade, tree, children[1]; nsims)
+    sims = simulate_descendants(clade, tree, first(getchildren(tree, nodename)); nsims)
     return calculate_SOS(sims), calculate_GND(sims, occ)
 end
 
@@ -17,7 +26,7 @@ end
 # Recreates the main `Node_analysis` function of the nodiv R package
 # (https://github.com/mkborregaard/nodiv).
 function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims=200)
-    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
+    nodevec = _internalnodes(tree)
     SOSs = Matrix{Float64}(undef, nsites(assemblage), length(nodevec))
     GNDs = Vector{Float64}(undef, length(nodevec))
     @progress for (i, node) in enumerate(nodevec)
@@ -31,19 +40,16 @@ end
 # and, per node, whether it is analysable plus the focal-clade and first-descendant
 # species names, so the parallel heavy pass need only read the assemblage.
 function _analysis_prepass(assemblage, tree)
-    nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
+    nodevec = _internalnodes(tree)
     N = length(nodevec)
     analysable = falses(N)
     parentsp = Vector{Vector{String}}(undef, N)   # focal clade species
     descsp = Vector{Vector{String}}(undef, N)   # first descendant's species
     for (i, node) in enumerate(nodevec)
-        ch = getchildren(tree, node)
-        if length(ch) == 2 &&
-            all(x -> !isleaf(tree, x) && nspecies(get_clade(assemblage, tree, x)) >= 3, ch)
-            analysable[i] = true
-            parentsp[i] = nodespecies(tree, node)
-            descsp[i] = nodespecies(tree, ch[1])
-        end
+        _isanalysable(assemblage, tree, node) || continue
+        analysable[i] = true
+        parentsp[i] = nodespecies(tree, node)
+        descsp[i] = nodespecies(tree, first(getchildren(tree, node)))
     end
     return nodevec, analysable, parentsp, descsp
 end
@@ -72,7 +78,7 @@ function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         gnd[nodevec[i]] = gndv[i]
         analysable[i] && (sos[nodevec[i]] = sosv[i])
     end
-    return NodeAnalysis(gnd, sos)
+    return NodeAnalysis(nodevec, gnd, sos)
 end
 
 # One-pass analysis returning GND together with the effect-size alternatives, all
@@ -96,6 +102,7 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
     spatv = fill(NaN, N)
     sesv = fill(NaN, N)
     pvalv = fill(NaN, N)
+    varyv = fill(NaN, N)
     sosv = Vector{Vector{Float64}}(undef, N)
     done = Threads.Atomic{Int}(0)
     total = count(analysable)
@@ -104,12 +111,13 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         clade = view(assemblage; species=parentsp[i])
         occ = richness(clade) .> 0                        # focal clade's occupied cells
         sims = _simulate_descendants(clade, descsp[i]; nsims)
+        sosv[i] = calculate_SOS(sims)
         gndv[i] = calculate_GND(sims, occ)
-        rmsv[i] = calculate_GND_rms(sims, occ)
-        spatv[i] = calculate_GND_spatial(sims, occ)
+        rmsv[i] = gnd_rms(sosv[i])
+        spatv[i] = gnd_spatial(sosv[i])
         sesv[i] = calculate_GND_ses(sims, occ)
         pvalv[i] = calculate_GND_pval(sims, occ)
-        sosv[i] = calculate_SOS(sims)
+        varyv[i] = _varying_share(sosv[i], occ)
         n = Threads.atomic_add!(done, 1) + 1
         n % 100 == 0 && @info "node_metrics: $n / $total analysable nodes done"
     end
@@ -120,6 +128,7 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
     spatial = Dict{String,Float64}()
     ses = Dict{String,Float64}()
     pval = Dict{String,Float64}()
+    varying = Dict{String,Float64}()
     sos = Dict{String,Vector{Float64}}()
     for i in 1:N
         gnd[nodevec[i]] = gndv[i]
@@ -128,17 +137,28 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         spatial[nodevec[i]] = spatv[i]
         ses[nodevec[i]] = sesv[i]
         pval[nodevec[i]] = pvalv[i]
+        varying[nodevec[i]] = varyv[i]
         sos[nodevec[i]] = sosv[i]
     end
-    return NodeMetrics(gnd, rms, spatial, ses, pval, sos)
+    return NodeMetrics(nodevec, gnd, rms, spatial, ses, pval, varying, sos)
 end
 
-# Node names whose GND exceeds `threshold` (NaN GNDs excluded). Accepts a `NodeAnalysis`
-# (from `node_analysis`) or a plain GND Dict.
-function divergent_nodes(gnd::AbstractDict; threshold=0.8)
-    return [node for (node, g) in gnd if !isnan(g) && g > threshold]
+# Node names whose GND exceeds `threshold` (NaN GNDs excluded). For a `NodeAnalysis` the
+# nodes come in tree order; a plain Dict of scores has no tree, so its nodes come most
+# divergent first (ties by name).
+function divergent_nodes(scores::AbstractDict; threshold=0.8)
+    nodes = [node for (node, g) in scores if !isnan(g) && g > threshold]
+    return sort!(nodes; by=node -> (-scores[node], node))
 end
-divergent_nodes(res::NodeAnalysis; threshold=0.8) = divergent_nodes(res.gnd; threshold)
+function divergent_nodes(res::NodeAnalysis; threshold=0.8)
+    return _intreeorder(res, res.gnd, >(threshold))
+end
+
+# The nodes of `res`, in tree order, whose score passes `isdivergent` (NaN scores excluded)
+function _intreeorder(res, scores, isdivergent)
+    passes(n) = haskey(scores, n) && !isnan(scores[n]) && isdivergent(scores[n])
+    return filter(passes, res.nodes)
+end
 
 function _default_threshold(by)
     by == :rms && return 1.5
@@ -152,11 +172,11 @@ end
 # for the original GND. The threshold default adapts to the chosen score.
 function divergent_nodes(res::NodeMetrics; by=:rms, threshold=_default_threshold(by))
     if by == :rms
-        [n for (n, v) in res.rms if !isnan(v) && v > threshold]
+        return _intreeorder(res, res.rms, >(threshold))
     elseif by == :pval
-        [n for (n, p) in res.pval if !isnan(p) && p < threshold]
+        return _intreeorder(res, res.pval, <(threshold))
     elseif by == :gnd
-        divergent_nodes(res.gnd; threshold)
+        return _intreeorder(res, res.gnd, >(threshold))
     else
         error("`by` must be :rms, :pval or :gnd")
     end

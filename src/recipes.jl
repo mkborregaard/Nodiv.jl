@@ -21,7 +21,7 @@
         "4th argument, e.g. plot_node(assemblage, tree, node, res)",
     )
     cached = pn.args[4]
-    sos = cached isa Union{NodeAnalysis,NodeMetrics} ? cached.sos[node] : cached
+    sos = cached isa AbstractNodeResult ? cached.sos[node] : cached
 
     layout := (2, 2)
     size --> (900, 800)
@@ -59,7 +59,7 @@ end
 
 @recipe function f(pg::Plot_Gnd)
     tree, gndvals = pg.args
-    gndvals isa Union{NodeAnalysis,NodeMetrics} && (gndvals = gndvals.gnd)
+    gndvals isa AbstractNodeResult && (gndvals = gndvals.gnd)
     shown = Dict(k => v for (k, v) in gndvals if !isnan(v))
 
     # The tree recipe draws a marker at every node and renders NaN-marker_z nodes

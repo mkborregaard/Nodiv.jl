@@ -17,7 +17,7 @@ using SpatialEcology: Assemblage, matrixrandomizer, nsites, nspecies, richness, 
 using Statistics: cor, mean, std
 using StatsBase: corspearman, tiedrank
 
-export NodeAnalysis, NodeMetrics
+export AbstractNodeResult, NodeAnalysis, NodeMetrics
 export get_clade, nodespecies, prune_to_shared!
 export simulate_descendants
 export calculate_GND, calculate_SOS
@@ -34,5 +34,6 @@ include("metrics.jl")
 include("analysis.jl")
 include("distances.jl")
 include("recipes.jl")
+include("deprecated.jl")
 
 end

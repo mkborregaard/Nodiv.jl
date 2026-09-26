@@ -108,3 +108,12 @@ function gnd_rms(sos::AbstractVector)
     return (f=filter(isfinite, sos); isempty(f) ? NaN : sqrt(mean(abs2, f)))
 end
 gnd_spatial(sos::AbstractVector) = (f=filter(isfinite, sos); isempty(f) ? NaN : std(f))
+
+# Share of the focal clade's occupied cells where the null model varies, i.e. where the
+# SOS is defined. The RMS-SOS over all occupied cells, counting the others as 0, is
+# `sqrt(share) * gnd_rms(sos)`.
+function _varying_share(sos, occupied)
+    n = count(occupied)
+    n == 0 && return NaN
+    return count(i -> occupied[i] && isfinite(sos[i]), eachindex(sos)) / n
+end

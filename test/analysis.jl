@@ -6,7 +6,7 @@
     res = node_metrics(assemblage, tree; nsims=99)
     @test Set(keys(res.gnd)) == Set(internal)
     @test Set(keys(res.sos)) == Set(TOY_ANALYSABLE)
-    for field in (:rms, :spatial, :ses, :pval)
+    for field in (:rms, :spatial, :ses, :pval, :varying)
         @test Set(keys(getfield(res, field))) == Set(TOY_ANALYSABLE)
     end
     @test all(isnan, res.gnd[n] for n in others)
@@ -19,8 +19,17 @@
     # clades X and Y live on opposite halves of the grid
     @test res.rms["root"] > 1.5
     @test res.pval["root"] < 0.05
+    @test res.nodes == internal
+    for n in TOY_ANALYSABLE
+        # rms and spatial summarise the cells where the null varies, so they follow
+        # from the SOS alone
+        @test res.rms[n] == gnd_rms(res.sos[n])
+        @test res.spatial[n] == gnd_spatial(res.sos[n])
+        @test 0 < res.varying[n] < 1  # site 1 is occupied but cannot vary
+    end
 
     ana = node_analysis(assemblage, tree; nsims=99)
+    @test ana.nodes == internal
     @test Set(keys(ana.gnd)) == Set(internal)
     @test Set(keys(ana.sos)) == Set(TOY_ANALYSABLE)
     @test isnan.(ana.sos["X"]) == isnan.(res.sos["X"])
@@ -37,6 +46,19 @@
     @test sims[1, :] == richness(get_clade(assemblage, tree, "X"))
 end
 
+@testset "the varying share links the two readings of RMS-SOS" begin
+    assemblage, tree = toy_data()
+    clade = get_clade(assemblage, tree, "root")
+    occupied = richness(clade) .> 0
+    sims = simulate_descendants(clade, tree, "X"; nsims=99)
+    sos_scores = calculate_SOS(sims)
+    share = Nodiv._varying_share(sos_scores, occupied)
+    @test share ≈ count(isfinite, sos_scores) / count(occupied)
+    @test share < 1
+    # RMS-SOS over all occupied cells, the fixed ones counted as 0
+    @test calculate_GND_rms(sims, occupied) ≈ sqrt(share) * gnd_rms(sos_scores)
+end
+
 @testset "divergent_nodes" begin
     assemblage, tree = toy_data()
     res = node_metrics(assemblage, tree; nsims=99)
@@ -49,8 +71,17 @@ end
     @test Set(divergent_nodes(res.gnd; threshold=0.5)) == above(res.gnd, 0.5)
     @test_throws ErrorException divergent_nodes(res; by=:ses)
 
+    # the result types give the nodes in tree order
+    divergent = divergent_nodes(res; threshold=0)
+    @test divergent == filter(in(Set(TOY_ANALYSABLE)), res.nodes)
+    @test divergent_nodes(res; by=:pval, threshold=1.1) == divergent
+    # a plain Dict has no tree: most divergent first
+    ranked = divergent_nodes(res.rms; threshold=0)
+    @test issorted([res.rms[n] for n in ranked]; rev=true)
+
     ana = node_analysis(assemblage, tree; nsims=99)
     @test Set(divergent_nodes(ana; threshold=0.5)) == above(ana.gnd, 0.5)
+    @test divergent_nodes(ana; threshold=0) == filter(in(Set(TOY_ANALYSABLE)), ana.nodes)
 end
 
 @testset "prune_to_shared!" begin

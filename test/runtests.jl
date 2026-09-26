@@ -13,4 +13,5 @@ include("toydata.jl")
     include("analysis.jl")
     include("distances.jl")
     include("recipes.jl")
+    include("deprecated.jl")
 end
