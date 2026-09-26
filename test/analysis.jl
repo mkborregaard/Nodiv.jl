@@ -20,11 +20,12 @@
     @test res.rms["root"] > 1.5
     @test res.pval["root"] < 0.05
     @test res.nodes == internal
+    @test sprint(show, res) == "NodeMetrics(11 internal nodes, 3 analysed, 30 cells)"
     for n in TOY_ANALYSABLE
         # rms and spatial summarise the cells where the null varies, so they follow
         # from the SOS alone
-        @test res.rms[n] == gnd_rms(res.sos[n])
-        @test res.spatial[n] == gnd_spatial(res.sos[n])
+        @test res.rms[n] == sos_rms(res.sos[n])
+        @test res.spatial[n] == sos_sd(res.sos[n])
         @test 0 < res.varying[n] < 1  # site 1 is occupied but cannot vary
     end
 
@@ -51,12 +52,13 @@ end
     clade = get_clade(assemblage, tree, "root")
     occupied = richness(clade) .> 0
     sims = simulate_descendants(clade, tree, "X"; nsims=99)
-    sos_scores = calculate_SOS(sims)
+    sos_scores = sos(sims)
     share = Nodiv._varying_share(sos_scores, occupied)
     @test share ≈ count(isfinite, sos_scores) / count(occupied)
     @test share < 1
     # RMS-SOS over all occupied cells, the fixed ones counted as 0
-    @test calculate_GND_rms(sims, occupied) ≈ sqrt(share) * gnd_rms(sos_scores)
+    squares = [isfinite(s) ? s^2 : 0.0 for s in sos_scores[occupied]]
+    @test sqrt(mean(squares)) ≈ sqrt(share) * sos_rms(sos_scores)
 end
 
 @testset "divergent_nodes" begin

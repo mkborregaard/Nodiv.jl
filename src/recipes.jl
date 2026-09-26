@@ -23,7 +23,7 @@
         throw(ArgumentError(msg))
     end
     cached = pn.args[4]
-    sos = cached isa AbstractNodeResult ? cached.sos[node] : cached
+    sos_scores = cached isa AbstractNodeResult ? cached.sos[node] : cached
 
     layout := (2, 2)
     size --> (900, 800)
@@ -38,7 +38,7 @@
         title := "SOS"
         fillcolor := :RdYlBu
         clim := (-8, 8)
-        sos, assm
+        sos_scores, assm
     end
     @series begin              # bottom-left: child 1
         subplot := 3

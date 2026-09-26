@@ -10,7 +10,6 @@ module Nodiv
 using Phylo: Phylo
 using Phylo: AbstractTree, getchildren, getdescendants, getleafnames, getnodename
 using Phylo: isleaf, keeptips!, preorder, traversal
-using ProgressLogging: @progress
 using Random: rand!
 using RecipesBase: @recipe, @series, @userplot
 using SpatialEcology: Assemblage, matrixrandomizer, nsites, nspecies, richness, speciesnames
@@ -20,12 +19,14 @@ using StatsBase: corspearman, tiedrank
 export AbstractNodeResult, NodeAnalysis, NodeMetrics
 export get_clade, nodespecies, prune_to_shared!
 export simulate_descendants
-export calculate_GND, calculate_SOS
-export calculate_GND_pval, calculate_GND_rms, calculate_GND_ses, calculate_GND_spatial
-export gnd_rms, gnd_spatial
-export node_analysis, node_based_analysis, node_metrics, process_node
+export divergence_pval, divergence_ses, gnd, sos, sos_rms, sos_sd
+export node_analysis, node_metrics, process_node
 export divergent_nodes, sos_distances
 export plot_gnd, plot_node
+
+# Deprecated
+export calculate_GND, calculate_GND_pval, calculate_GND_rms, calculate_GND_ses
+export calculate_GND_spatial, calculate_SOS, gnd_rms, gnd_spatial, node_based_analysis
 
 include("types.jl")
 include("clades.jl")

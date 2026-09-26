@@ -13,26 +13,27 @@ function _internalnodes(tree)
     return [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
 end
 
-# Calculate SOS and GND for a single node (NaN when the node can't be analysed).
-function process_node(assemblage, tree, nodename; nsims=200)
-    clade = get_clade(assemblage, tree, nodename)
-    _isanalysable(assemblage, tree, nodename) || return (fill(NaN, nsites(clade)), NaN)
-    occ = richness(clade) .> 0          # focal clade's occupied cells (deterministic)
-    sims = simulate_descendants(clade, tree, first(getchildren(tree, nodename)); nsims)
-    return calculate_SOS(sims), calculate_GND(sims, occ)
+# Log progress every 100 analysed nodes; `done` is shared by the threads
+function _progress!(done, total, label)
+    n = Threads.atomic_add!(done, 1) + 1
+    n % 100 == 0 && @info "$label: $n / $total analysable nodes done"
+    return nothing
 end
 
-# Run the node-based analysis over every internal node of the tree.
-# Recreates the main `Node_analysis` function of the nodiv R package
-# (https://github.com/mkborregaard/nodiv).
-function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims=200)
-    nodevec = _internalnodes(tree)
-    SOSs = Matrix{Float64}(undef, nsites(assemblage), length(nodevec))
-    GNDs = Vector{Float64}(undef, length(nodevec))
-    @progress for (i, node) in enumerate(nodevec)
-        SOSs[:, i], GNDs[i] = process_node(assemblage, tree, node; nsims)
-    end
-    return SOSs, GNDs
+"""
+    process_node(assemblage, tree, node; nsims=200) -> (sos_scores, gnd)
+
+The per-cell [`sos`](@ref) and the [`gnd`](@ref) of one node, from `nsims` fresh draws
+of the null model. A node that cannot be analysed gives all-`NaN` SOS and a `NaN` GND: a
+node is analysed when it has two children with at least three species each in the
+assemblage. To analyse the whole tree, use [`node_metrics`](@ref).
+"""
+function process_node(assemblage, tree, node; nsims=200)
+    clade = get_clade(assemblage, tree, node)
+    _isanalysable(assemblage, tree, node) || return (fill(NaN, nsites(clade)), NaN)
+    occ = richness(clade) .> 0          # focal clade's occupied cells (deterministic)
+    sims = simulate_descendants(clade, tree, first(getchildren(tree, node)); nsims)
+    return sos(sims), gnd(sims, occ)
 end
 
 # Serial pre-pass shared by `node_analysis` and `node_metrics`: everything that touches
@@ -54,44 +55,65 @@ function _analysis_prepass(assemblage, tree)
     return nodevec, analysable, parentsp, descsp
 end
 
-# Compute the per-cell SOS pattern and the GND for every internal node. Returns a
-# `NodeAnalysis` to hand to the explore functions - the "compute once, explore a lot"
-# entry point; cache it (e.g. with JLD2) and reload it. See `node_metrics` for the
-# effect-size scores (RMS/spatial/SES/pval). Multithreaded like `node_metrics`: launch
-# Julia with `-t auto` for the speedup.
+"""
+    node_analysis(assemblage, tree; nsims=200) -> NodeAnalysis
+
+The per-cell [`sos`](@ref) and the [`gnd`](@ref) of every internal node of `tree`, each
+from `nsims` draws of the null model. [`node_metrics`](@ref) also gives the effect-size
+scores from the same draws, and is usually the better choice.
+
+The result is meant to be computed once, cached (e.g. with JLD2) and explored with
+[`divergent_nodes`](@ref), [`sos_distances`](@ref), `plot_gnd` and `plot_node`. The
+nodes are analysed in parallel: start Julia with several threads (`julia -t auto`).
+"""
 function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims=200)
     nodevec, analysable, parentsp, descsp = _analysis_prepass(assemblage, tree)
     N = length(nodevec)
     gndv = fill(NaN, N)
     sosv = Vector{Vector{Float64}}(undef, N)
+    done = Threads.Atomic{Int}(0)
+    total = count(analysable)
     Threads.@threads :dynamic for i in 1:N
         analysable[i] || continue
         clade = view(assemblage; species=parentsp[i])
         occ = richness(clade) .> 0
         sims = _simulate_descendants(clade, descsp[i]; nsims)
-        gndv[i] = calculate_GND(sims, occ)
-        sosv[i] = calculate_SOS(sims)
+        gndv[i] = gnd(sims, occ)
+        sosv[i] = sos(sims)
+        _progress!(done, total, "node_analysis")
     end
-    gnd = Dict{String,Float64}()
-    sos = Dict{String,Vector{Float64}}()
+    gnd_scores = Dict{String,Float64}()
+    sos_scores = Dict{String,Vector{Float64}}()
     for i in 1:N
-        gnd[nodevec[i]] = gndv[i]
-        analysable[i] && (sos[nodevec[i]] = sosv[i])
+        gnd_scores[nodevec[i]] = gndv[i]
+        analysable[i] && (sos_scores[nodevec[i]] = sosv[i])
     end
-    return NodeAnalysis(nodevec, gnd, sos)
+    return NodeAnalysis(nodevec, gnd_scores, sos_scores)
 end
 
-# One-pass analysis returning GND together with the effect-size alternatives, all
-# from the same null draws (one randomisation per node). The published swap null
-# fixes range size, so the `spatial`/GND scores measure spatial turnover rather than
-# richness asymmetry. Cache the result with JLD2 as for `node_analysis`.
-#
-# Multithreaded: the per-node swap randomisation dominates the cost and is independent
-# across nodes, so start Julia with `-t auto` (or set JULIA_NUM_THREADS) for a near-
-# linear speedup. All tree access is done in a serial pre-pass; the parallel section
-# only reads the assemblage and builds thread-local randomisers. Results carry the
-# usual Monte-Carlo noise and are not bit-reproducible across runs (true single-thread
-# too, as nothing is seeded).
+"""
+    node_metrics(assemblage, tree; nsims=200) -> NodeMetrics
+
+The divergence of every internal node of `tree`: its per-cell [`sos`](@ref), the
+original [`gnd`](@ref), and the effect-size scores [`sos_rms`](@ref) (`rms`, the
+recommended score), [`sos_sd`](@ref) (`spatial`), [`divergence_ses`](@ref) (`ses`) and
+[`divergence_pval`](@ref) (`pval`), all from the same `nsims` draws of the null model.
+`varying` is the share of each node's occupied cells where the null model varies, the
+cells the SOS-based scores rest on; `sqrt(varying) * rms` is the RMS-SOS over all
+occupied cells, with the others counted as 0.
+
+The null model is the curveball (swap) randomisation of the parent clade's
+presence-absence matrix, which keeps each species' range size and each cell's richness.
+So the scores measure where the two descendant clades occur, not how rich they are.
+
+Nodes that cannot be analysed (see [`process_node`](@ref)) have a `NaN` GND and no
+other entries. The result is meant to be computed once, cached (e.g. with JLD2) and
+explored with [`divergent_nodes`](@ref), [`sos_distances`](@ref), `plot_gnd` and
+`plot_node`.
+
+The nodes are analysed in parallel: start Julia with several threads (`julia -t auto`)
+for a near-linear speed-up. The results carry Monte Carlo noise and differ between runs.
+"""
 function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
     nodevec, analysable, parentsp, descsp = _analysis_prepass(assemblage, tree)
     N = length(nodevec)
@@ -113,65 +135,50 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         sims = _simulate_descendants(clade, descsp[i]; nsims)
         me, sd = _moments(sims)
         sosv[i] = _sos(sims, me, sd)
-        gndv[i] = calculate_GND(sims, occ)
-        rmsv[i] = gnd_rms(sosv[i])
-        spatv[i] = gnd_spatial(sosv[i])
+        gndv[i] = gnd(sims, occ)
+        rmsv[i] = sos_rms(sosv[i])
+        spatv[i] = sos_sd(sosv[i])
         stat, nullstats = _msos_null(sims, me, sd, occ .& (sd .> 0))
         sesv[i] = _ses(stat, nullstats)
         pvalv[i] = _pval(stat, nullstats)
         varyv[i] = _varying_share(sosv[i], occ)
-        n = Threads.atomic_add!(done, 1) + 1
-        n % 100 == 0 && @info "node_metrics: $n / $total analysable nodes done"
+        _progress!(done, total, "node_metrics")
     end
 
     # assemble the result dicts (serial)
-    gnd = Dict{String,Float64}()
+    gnd_scores = Dict{String,Float64}()
     rms = Dict{String,Float64}()
     spatial = Dict{String,Float64}()
     ses = Dict{String,Float64}()
     pval = Dict{String,Float64}()
     varying = Dict{String,Float64}()
-    sos = Dict{String,Vector{Float64}}()
+    sos_scores = Dict{String,Vector{Float64}}()
     for i in 1:N
-        gnd[nodevec[i]] = gndv[i]
+        gnd_scores[nodevec[i]] = gndv[i]
         analysable[i] || continue
         rms[nodevec[i]] = rmsv[i]
         spatial[nodevec[i]] = spatv[i]
         ses[nodevec[i]] = sesv[i]
         pval[nodevec[i]] = pvalv[i]
         varying[nodevec[i]] = varyv[i]
-        sos[nodevec[i]] = sosv[i]
+        sos_scores[nodevec[i]] = sosv[i]
     end
-    return NodeMetrics(nodevec, gnd, rms, spatial, ses, pval, varying, sos)
+    return NodeMetrics(nodevec, gnd_scores, rms, spatial, ses, pval, varying, sos_scores)
 end
 
-# Node names whose GND exceeds `threshold` (NaN GNDs excluded). For a `NodeAnalysis` the
-# nodes come in tree order; a plain Dict of scores has no tree, so its nodes come most
-# divergent first (ties by name).
-function divergent_nodes(scores::AbstractDict; threshold=0.8)
-    nodes = [node for (node, g) in scores if !isnan(g) && g > threshold]
-    return sort!(nodes; by=node -> (-scores[node], node))
-end
-function divergent_nodes(res::NodeAnalysis; threshold=0.8)
-    return _intreeorder(res, res.gnd, >(threshold))
-end
+"""
+    divergent_nodes(res::NodeMetrics; by=:rms, threshold) -> Vector{String}
+    divergent_nodes(res::NodeAnalysis; threshold=0.8) -> Vector{String}
+    divergent_nodes(scores::AbstractDict; threshold=0.8) -> Vector{String}
 
-# The nodes of `res`, in tree order, whose score passes `isdivergent` (NaN scores excluded)
-function _intreeorder(res, scores, isdivergent)
-    passes(n) = haskey(scores, n) && !isnan(scores[n]) && isdivergent(scores[n])
-    return filter(passes, res.nodes)
-end
+The divergent nodes of an analysis result, in the order they appear on the tree.
 
-function _default_threshold(by)
-    by == :rms && return 1.5
-    by == :pval && return 0.05
-    return 0.8
-end
-
-# For a `NodeMetrics`, rank divergence by the size-robust RMS-SOS effect size by
-# default (null = 1). Pass `by = :pval` for the null-calibrated Monte-Carlo
-# significance (note: significance carries a clade-size/power bias), or `by = :gnd`
-# for the original GND. The threshold default adapts to the chosen score.
+For a `NodeMetrics`, `by` picks the score: `:rms` (RMS-SOS, the default; divergent above
+`threshold = 1.5`), `:pval` (below `threshold = 0.05`; being a significance, larger clades
+pass it more easily) or `:gnd` (above `threshold = 0.8`). A `NodeAnalysis` only has the
+GND. For a plain Dict of node => score, the nodes above `threshold` come most divergent
+first, as there is no tree order. Nodes with a `NaN` score are never divergent.
+"""
 function divergent_nodes(res::NodeMetrics; by=:rms, threshold=_default_threshold(by))
     if by == :rms
         return _intreeorder(res, res.rms, >(threshold))
@@ -182,4 +189,23 @@ function divergent_nodes(res::NodeMetrics; by=:rms, threshold=_default_threshold
     else
         throw(ArgumentError("`by` must be :rms, :pval or :gnd; got $(repr(by))"))
     end
+end
+function divergent_nodes(res::NodeAnalysis; threshold=0.8)
+    return _intreeorder(res, res.gnd, >(threshold))
+end
+function divergent_nodes(scores::AbstractDict; threshold=0.8)
+    nodes = [node for (node, score) in scores if !isnan(score) && score > threshold]
+    return sort!(nodes; by=node -> (-scores[node], node))
+end
+
+function _default_threshold(by)
+    by == :rms && return 1.5
+    by == :pval && return 0.05
+    return 0.8
+end
+
+# The nodes of `res`, in tree order, whose score passes `isdivergent` (NaN scores excluded)
+function _intreeorder(res, scores, isdivergent)
+    passes(n) = haskey(scores, n) && !isnan(scores[n]) && isdivergent(scores[n])
+    return filter(passes, res.nodes)
 end

@@ -94,9 +94,3 @@ function sos_distances(
         reduce(hcat, res.sos[n] for n in nodes); overlapweight, occupied, kw...
     )
 end
-
-function sos_distances(assemblage, tree, nodes; nsims=200, overlapweight::Bool=false, kw...)
-    sosmat = reduce(hcat, process_node(assemblage, tree, node; nsims)[1] for node in nodes)
-    occupied = overlapweight ? _occupied_matrix(assemblage, tree, nodes) : nothing
-    return _sos_distances(sosmat; overlapweight, occupied, kw...)
-end
