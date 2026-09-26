@@ -8,8 +8,8 @@
 module Nodiv
 
 using Phylo: Phylo
-using Phylo: AbstractTree, getchildren, getdescendants, getleafnames, getnodename, isleaf,
-    keeptips!, preorder, traversal
+using Phylo: AbstractTree, getchildren, getdescendants, getleafnames, getnodename
+using Phylo: isleaf, keeptips!, preorder, traversal
 using ProgressLogging: @progress
 using Random: rand!
 using RecipesBase: @recipe, @series, @userplot

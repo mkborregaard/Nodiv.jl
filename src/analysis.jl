@@ -16,7 +16,7 @@ end
 # Recreates the main `Node_analysis` function of the nodiv R package
 # (https://github.com/mkborregaard/nodiv).
 function node_based_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
-   nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)] #shuffle!(collect(nodenamefilter(!isleaf, tree)))
+   nodevec = [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
    SOSs = Matrix{Float64}(undef, nsites(assemblage), length(nodevec))
    GNDs = Vector{Float64}(undef, length(nodevec))
    @progress for (i, node) in enumerate(nodevec)
@@ -58,7 +58,7 @@ function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
     sosv = Vector{Vector{Float64}}(undef, N)
     Threads.@threads :dynamic for i in 1:N
         analysable[i] || continue
-        clade = view(assemblage, species = parentsp[i])
+        clade = view(assemblage; species=parentsp[i])
         occ = richness(clade) .> 0
         sims = _simulate_descendants(clade, descsp[i]; nsims)
         gndv[i] = calculate_GND(sims, occ)
@@ -94,7 +94,7 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims = 200)
     done = Threads.Atomic{Int}(0); total = count(analysable)
     Threads.@threads :dynamic for i in 1:N
         analysable[i] || continue
-        clade = view(assemblage, species = parentsp[i])
+        clade = view(assemblage; species=parentsp[i])
         occ = richness(clade) .> 0                        # focal clade's occupied cells
         sims = _simulate_descendants(clade, descsp[i]; nsims)
         gndv[i]  = calculate_GND(sims, occ);     rmsv[i]  = calculate_GND_rms(sims, occ)
@@ -123,12 +123,17 @@ divergent_nodes(gnd::AbstractDict; threshold = 0.8) =
     [node for (node, g) in gnd if !isnan(g) && g > threshold]
 divergent_nodes(res::NodeAnalysis; threshold = 0.8) = divergent_nodes(res.gnd; threshold)
 
+function _default_threshold(by)
+    by == :rms && return 1.5
+    by == :pval && return 0.05
+    return 0.8
+end
+
 # For a `NodeMetrics`, rank divergence by the size-robust RMS-SOS effect size by
 # default (null = 1). Pass `by = :pval` for the null-calibrated Monte-Carlo
 # significance (note: significance carries a clade-size/power bias), or `by = :gnd`
 # for the original GND. The threshold default adapts to the chosen score.
-function divergent_nodes(res::NodeMetrics; by = :rms,
-                         threshold = by == :rms ? 1.5 : by == :pval ? 0.05 : 0.8)
+function divergent_nodes(res::NodeMetrics; by=:rms, threshold=_default_threshold(by))
     if by == :rms
         [n for (n, v) in res.rms  if !isnan(v) && v > threshold]
     elseif by == :pval

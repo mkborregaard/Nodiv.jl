@@ -17,17 +17,17 @@ _occupied(sims) = [!all(==(first(c)), c) for c in eachcol(sims)]
 # divergence. `occupied` is a per-cell boolean mask (default: the non-constant columns).
 function calculate_GND(sims, occupied = _occupied(sims))
   # two internal convenience functions
-  logit(p) = log(p/(1-p))
-  invlogit(p) = exp(p)/(1+exp(p))
+  logit(p) = log(p / (1 - p))
+  invlogit(p) = exp(p) / (1 + exp(p))
 
   n = size(sims, 1)
   idx = findall(occupied)
   isempty(idx) && return NaN
-  r = [tiedrank(view(sims, :, j))[1]/(n + 1) for j in idx]
+  r = [tiedrank(view(sims, :, j))[1] / (n + 1) for j in idx]
   # two-sided P (eqn 3); the -1/n keeps P off the 0/1 boundary so logit stays finite
-  p = 1 .- 2 .* abs.(r .- 0.5) .- 1/n
+  p = 1 .- 2 .* abs.(r .- 0.5) .- 1 / n
   α = mean(logit.(p))
-  1-invlogit(α)
+  1 - invlogit(α)
 end
 
 # ---- effect-size alternatives to GND -----------------------------------------
