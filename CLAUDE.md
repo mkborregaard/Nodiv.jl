@@ -24,9 +24,12 @@ Do **not** trigger a recompute casually. Work against the cached `res_e` / `res_
 
 ## Constraints
 
-- Keep the public signature of `sos_distances(res, nodes; …)` stable. `NodivWorkshop/script.jl` calls it and must keep working. Add keyword arguments with defaults; do not change the positional arguments or the return type (a pairwise distance matrix consumed by `fit(MDS, …; distances = true)`).
+- Keep the public signature of `sos_distances(res, nodes; …)` stable. `NodivWorkshop/script.jl` calls it and must keep working. Add keyword arguments with defaults; do not change the positional arguments or the return type (a pairwise distance matrix consumed by `sos_ordination`, `sos_clusters` and `sos_similarity_communities`).
+- The Plots recipes (`plot_gnd`, `plot_node`) stay in Nodiv for users who do not use Makie. Do not move or deprecate them unless the user explicitly says so.
+- New function names use underscores for multi-word names and are never capitalized (types keep CamelCase).
+- Division of labour: general analysis infrastructure goes in Nodiv, visualisation in NodivMakie, anything specific to the workshop's data (birds, AVONET traits, genus/family/order names) in NodivWorkshop. Nodiv's docs must not point to the workshop.
 - This is a published method. Changes to metric or distance definitions must be scientifically deliberate and match the design spec, not convenience refactors.
 
-## Current task
+## Design spec
 
-See `docs/sos_pattern_grouping_design.md` for the active design spec: grouping divergent nodes by SOS-pattern similarity. That document is the source of truth for what to build and why. Start there.
+The design spec for grouping divergent nodes by SOS-pattern similarity (`sos_distances`, `sos_ordination`, `sos_clusters`, `sos_similarity_communities`) is `docs/sos_pattern_grouping_design.md` in NodivWorkshop, as it is written about the workshop's data. It is the source of truth for what these functions do and why.

@@ -57,6 +57,28 @@ So a clade whose daughters co-occur almost everywhere, and segregate in a few ce
 GND treats these cells as showing no divergence (a *P* value near 1).
 `sos_distances` correlates SOS maps over the cells where both SOS values are defined, so it leaves them out too.
 
+## Working with the results
+
+- `node_scores(res, :rms)` gives one score of every analysed node as a Dict, `default_score(res)` the score a result is judged by (`:rms`, or `:gnd` for a `NodeAnalysis`), and `most_divergent(res, nodes)` the most divergent of `nodes`.
+- `clade_richness(assemblage, tree)` returns a function giving the per-cell richness of a node's clade, the same as `richness(get_clade(assemblage, tree, node))` but fast, for computing it for many nodes.
+
+## Grouping nodes by SOS pattern
+
+Divergent nodes can be grouped by how alike their SOS maps are, all from the cached result:
+
+```julia
+nodes = divergent_nodes(res)
+D = sos_distances(res, nodes; minoverlap=8)          # 1 - |r| between the SOS maps
+o = sos_ordination(D, nodes; maxoutdim=10)           # classical MDS; o.eigenvalues
+clusters = sos_clusters(D, nodes; simcut=0.7)        # complete-linkage clusters
+communities = sos_similarity_communities(D, nodes; simthresh=0.7)
+```
+
+`sos_clusters` cuts a hierarchical clustering where the similarity `|r|` falls below `simcut`; shown, the result lists the clusters of more than one node, and `sos_cluster_sizes` counts them.
+`sos_similarity_communities` is a check on it: the modularity communities of the graph linking nodes with `|r| >= simthresh`.
+Few groups against a background of nodes on their own is a result, not a failure: the divergent nodes are then largely idiosyncratic in where they diverge.
+Set `minoverlap` for each space, as grids of very different numbers of cells need different floors.
+
 ## Plotting
 
 Nodiv has Plots recipes (through RecipesBase, so it does not depend on Plots itself):
@@ -64,7 +86,7 @@ Nodiv has Plots recipes (through RecipesBase, so it does not depend on Plots its
 - `plot_gnd(tree, res)`: the GND of the analysed nodes on the tree.
 - `plot_node(assemblage, tree, node, res)`: the node's clade, its SOS map and its two descendant clades.
 
-[NodivMakie](https://github.com/mkborregaard/NodivMakie.jl) has Makie versions of these, including an interactive explorer.
+[NodivMakie](https://github.com/mkborregaard/NodivMakie.jl) has Makie versions of these, including an interactive explorer, and plots of the ordinations and clusters.
 
 ## Deprecated names
 

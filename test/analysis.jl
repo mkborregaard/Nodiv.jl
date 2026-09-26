@@ -86,6 +86,39 @@ end
     @test divergent_nodes(ana; threshold=0) == filter(in(Set(TOY_ANALYSABLE)), ana.nodes)
 end
 
+@testset "node_scores and most_divergent" begin
+    assemblage, tree = toy_data()
+    res = node_metrics(assemblage, tree; nsims=99)
+    ana = node_analysis(assemblage, tree; nsims=99)
+
+    @test default_score(res) == :rms
+    @test default_score(ana) == :gnd
+    @test node_scores(res) === res.rms
+    @test node_scores(res, :pval) === res.pval
+    @test node_scores(ana) === ana.gnd
+    @test_throws ArgumentError node_scores(res, :sos)
+    @test_throws ArgumentError node_scores(ana, :rms)
+
+    @test most_divergent(res) == argmax(n -> res.rms[n], TOY_ANALYSABLE)
+    @test most_divergent(res; by=:pval) == argmin(n -> res.pval[n], TOY_ANALYSABLE)
+    @test most_divergent(res, ["X", "Y"]) == argmax(n -> res.rms[n], ["X", "Y"])
+    # nodes without a score are left out
+    @test most_divergent(res, ["a", "X"]) == "X"
+    @test_throws ArgumentError most_divergent(res, ["a"])
+end
+
+@testset "clade_richness" begin
+    assemblage, tree = toy_data()
+    richness_of = clade_richness(assemblage, tree)
+    for node in ["root", "X", "Y", "a"]
+        @test richness_of(node) == richness(get_clade(assemblage, tree, node))
+    end
+    @test clade_richness(assemblage, tree, "X") == richness_of("X")
+    # species of the clade missing from the assemblage are left out
+    part = view(assemblage; species=string.('a':'f'))
+    @test clade_richness(part, tree, "root") == richness(get_clade(assemblage, tree, "X"))
+end
+
 @testset "prune_to_shared!" begin
     assemblage, _ = toy_data()
     tree = parsenewick("(" * chop(TOY_NEWICK) * ":1,m:1)top;")

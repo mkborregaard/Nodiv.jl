@@ -223,3 +223,43 @@ function _intreeorder(res, scores, isdivergent)
     passes(n) = haskey(scores, n) && !isnan(scores[n]) && isdivergent(scores[n])
     return filter(passes, res.nodes)
 end
+
+"""
+    default_score(res) -> Symbol
+
+The divergence score an analysis result is judged by unless another is asked for: `:rms`
+for a [`NodeMetrics`](@ref), `:gnd` for a [`NodeAnalysis`](@ref), which only has the GND.
+"""
+default_score(::NodeMetrics) = :rms
+default_score(::NodeAnalysis) = :gnd
+
+"""
+    node_scores(res, by=default_score(res)) -> Dict{String,Float64}
+
+The per-node scores `by` of an analysis result, as a Dict of node name => score: `:rms`,
+`:sd`, `:ses`, `:pval`, `:gnd` or `:varying` for a [`NodeMetrics`](@ref), `:gnd` for a
+[`NodeAnalysis`](@ref).
+"""
+function node_scores(res::AbstractNodeResult, by::Symbol=default_score(res))
+    if by in (:nodes, :sos) || !hasfield(typeof(res), by)
+        scores = filter(!in((:nodes, :sos)), fieldnames(typeof(res)))
+        msg = "`by` must be one of $(join(repr.(scores), ", ")); got $(repr(by))"
+        throw(ArgumentError(msg))
+    end
+    return getfield(res, by)
+end
+
+"""
+    most_divergent(res, nodes=res.nodes; by=default_score(res)) -> String
+
+The node of `nodes` with the most divergent score `by` (see [`node_scores`](@ref)): the
+lowest for `:pval`, the highest for the other scores. Nodes with no score or a `NaN` score
+are left out.
+"""
+function most_divergent(res::AbstractNodeResult, nodes=res.nodes; by=default_score(res))
+    scores = node_scores(res, by)
+    scored = [n for n in nodes if haskey(scores, n) && !isnan(scores[n])]
+    isempty(scored) && throw(ArgumentError("None of `nodes` has a `$by` score"))
+    pick = by === :pval ? argmin : argmax
+    return pick(n -> scores[n], scored)
+end

@@ -43,7 +43,8 @@ end
 # Occupied-cell mask for `nodes`, columns aligned with their SOS vectors. Deterministic and
 # cheap (no null model), so it is safe to derive on the fly for the overlap weighting.
 function _occupied_matrix(assemblage, tree, nodes)
-    return reduce(hcat, (richness(get_clade(assemblage, tree, n)) .> 0) for n in nodes)
+    richness_of = clade_richness(assemblage, tree)
+    return reduce(hcat, (richness_of(n) .> 0) for n in nodes)
 end
 
 """
@@ -53,10 +54,11 @@ end
                   occupied=nothing) -> Matrix{Float64}
 
 Pairwise distances between the SOS maps of `nodes`, for grouping nodes by how alike
-their divergence geography is (see `docs/sos_pattern_grouping_design.md`). `res` is the
-result of [`node_metrics`](@ref) or [`node_analysis`](@ref); or pass the SOS vectors
-themselves. The result is symmetric with a zero diagonal, one row and column per node,
-and can be passed to `fit(MDS, D; distances=true)`.
+their divergence geography is. `res` is the result of [`node_metrics`](@ref) or
+[`node_analysis`](@ref), or a Dict of node name => SOS vector; or pass the SOS vectors
+themselves. The result is symmetric with a zero diagonal, one row and column per node. It
+is what [`sos_ordination`](@ref), [`sos_clusters`](@ref) and
+[`sos_similarity_communities`](@ref) group the nodes by.
 
 The distance is `1 - |r|`, with `r` the correlation of the two SOS maps over the cells
 where both are defined: where both parent clades are present and the null model varies.
@@ -82,8 +84,10 @@ function sos_distances(sosvectors::AbstractVector; kw...)
     return _sos_distances(reduce(hcat, sosvectors); kw...)
 end
 
+sos_distances(res::AbstractNodeResult, nodes; kw...) = sos_distances(res.sos, nodes; kw...)
+
 function sos_distances(
-    res::AbstractNodeResult,
+    sos::AbstractDict,
     nodes;
     overlapweight::Bool=false,
     assemblage=nothing,
@@ -94,13 +98,13 @@ function sos_distances(
     if overlapweight
         if assemblage === nothing || tree === nothing
             msg =
-                "overlapweight = true on a `res` needs `assemblage` and `tree` to " *
+                "overlapweight = true on a result needs `assemblage` and `tree` to " *
                 "derive occupancy"
             throw(ArgumentError(msg))
         end
         occupied = _occupied_matrix(assemblage, tree, nodes)
     end
     return _sos_distances(
-        reduce(hcat, res.sos[n] for n in nodes); overlapweight, occupied, kw...
+        reduce(hcat, sos[n] for n in nodes); overlapweight, occupied, kw...
     )
 end
