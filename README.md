@@ -19,7 +19,7 @@ sos_distances(res, divergent_nodes(res)) # how alike the nodes' SOS maps are
 ```
 
 `node_metrics` analyses the nodes in parallel, so start Julia with several threads (`julia -t auto`).
-The results carry Monte Carlo noise and differ slightly between runs.
+The results carry Monte Carlo noise; pass an `rng` (e.g. `node_metrics(assemblage, tree; rng=Xoshiro(1))`) to make them reproducible, with the same results for any number of threads.
 
 ## Divergence scores
 

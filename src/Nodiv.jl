@@ -12,7 +12,7 @@ module Nodiv
 using Phylo: Phylo
 using Phylo: AbstractTree, getchildren, getdescendants, getleafnames, getnodename
 using Phylo: isleaf, keeptips!, preorder, traversal
-using Random: rand!
+using Random: AbstractRNG, Xoshiro, default_rng, rand!
 using RecipesBase: @recipe, @series, @userplot
 using SpatialEcology: Assemblage, matrixrandomizer, nsites, nspecies, richness, speciesnames
 using Statistics: cor, mean, std

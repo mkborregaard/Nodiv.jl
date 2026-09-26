@@ -93,3 +93,26 @@ end
     @test prune_to_shared!(tree, assemblage) === tree
     @test sort(getleafnames(tree)) == string.('a':'l')
 end
+
+@testset "reproducible with an rng" begin
+    assemblage, tree = toy_data()
+    a = node_metrics(assemblage, tree; nsims=30, rng=Xoshiro(11))
+    b = node_metrics(assemblage, tree; nsims=30, rng=Xoshiro(11))
+    c = node_metrics(assemblage, tree; nsims=30, rng=Xoshiro(12))
+    for field in (:gnd, :rms, :sd, :ses, :pval, :varying, :sos)
+        @test isequal(getfield(a, field), getfield(b, field))
+    end
+    @test !isequal(a.sos, c.sos)
+    # node_analysis draws the same null for the same rng
+    ana = node_analysis(assemblage, tree; nsims=30, rng=Xoshiro(11))
+    @test isequal(ana.sos, a.sos)
+    @test isequal(ana.gnd, a.gnd)
+
+    clade = get_clade(assemblage, tree, "root")
+    sims(seed) = simulate_descendants(clade, tree, "X"; nsims=10, rng=Xoshiro(seed))
+    @test sims(3) == sims(3)
+    @test sims(3) != sims(4)
+    s1, g1 = process_node(assemblage, tree, "root"; nsims=10, rng=Xoshiro(5))
+    s2, g2 = process_node(assemblage, tree, "root"; nsims=10, rng=Xoshiro(5))
+    @test isequal(s1, s2) && g1 == g2
+end

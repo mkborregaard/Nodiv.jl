@@ -13,6 +13,10 @@ function _internalnodes(tree)
     return [getnodename(tree, x) for x in traversal(tree, preorder) if !isleaf(tree, x)]
 end
 
+# One seed per node, drawn up front: each node's null draws then depend on `rng` alone, not
+# on how the nodes are spread over the threads
+_nodeseeds(rng, n) = rand(rng, UInt64, n)
+
 # Log progress every 100 analysed nodes; `done` is shared by the threads
 function _progress!(done, total, label)
     n = Threads.atomic_add!(done, 1) + 1
@@ -21,18 +25,19 @@ function _progress!(done, total, label)
 end
 
 """
-    process_node(assemblage, tree, node; nsims=200) -> (sos_scores, gnd)
+    process_node(assemblage, tree, node; nsims=200, rng=default_rng())
+        -> (sos_scores, gnd)
 
 The per-cell [`sos`](@ref) and the [`gnd`](@ref) of one node, from `nsims` fresh draws
-of the null model. A node that cannot be analysed gives all-`NaN` SOS and a `NaN` GND: a
-node is analysed when it has two children with at least three species each in the
-assemblage. To analyse the whole tree, use [`node_metrics`](@ref).
+of the null model (from `rng`). A node that cannot be analysed gives all-`NaN` SOS and a
+`NaN` GND: a node is analysed when it has two children with at least three species each
+in the assemblage. To analyse the whole tree, use [`node_metrics`](@ref).
 """
-function process_node(assemblage, tree, node; nsims=200)
+function process_node(assemblage, tree, node; nsims=200, rng::AbstractRNG=default_rng())
     clade = get_clade(assemblage, tree, node)
     _isanalysable(assemblage, tree, node) || return (fill(NaN, nsites(clade)), NaN)
     occ = richness(clade) .> 0          # focal clade's occupied cells (deterministic)
-    sims = simulate_descendants(clade, tree, first(getchildren(tree, node)); nsims)
+    sims = simulate_descendants(clade, tree, first(getchildren(tree, node)); nsims, rng)
     return sos(sims), gnd(sims, occ)
 end
 
@@ -56,7 +61,7 @@ function _analysis_prepass(assemblage, tree)
 end
 
 """
-    node_analysis(assemblage, tree; nsims=200) -> NodeAnalysis
+    node_analysis(assemblage, tree; nsims=200, rng=default_rng()) -> NodeAnalysis
 
 The per-cell [`sos`](@ref) and the [`gnd`](@ref) of every internal node of `tree`, each
 from `nsims` draws of the null model. [`node_metrics`](@ref) also gives the effect-size
@@ -64,11 +69,16 @@ scores from the same draws, and is usually the better choice.
 
 The result is meant to be computed once, cached (e.g. with JLD2) and explored with
 [`divergent_nodes`](@ref), [`sos_distances`](@ref), `plot_gnd` and `plot_node`. The
-nodes are analysed in parallel: start Julia with several threads (`julia -t auto`).
+nodes are analysed in parallel: start Julia with several threads (`julia -t auto`). The
+draws come from `rng`, as for `node_metrics`, which gives the same SOS and GND for the
+same `rng`.
 """
-function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims=200)
+function node_analysis(
+    assemblage::Assemblage, tree::AbstractTree; nsims=200, rng::AbstractRNG=default_rng()
+)
     nodevec, analysable, parentsp, descsp = _analysis_prepass(assemblage, tree)
     N = length(nodevec)
+    seeds = _nodeseeds(rng, N)
     gndv = fill(NaN, N)
     sosv = Vector{Vector{Float64}}(undef, N)
     done = Threads.Atomic{Int}(0)
@@ -77,7 +87,7 @@ function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         analysable[i] || continue
         clade = view(assemblage; species=parentsp[i])
         occ = richness(clade) .> 0
-        sims = _simulate_descendants(clade, descsp[i]; nsims)
+        sims = _simulate_descendants(clade, descsp[i]; nsims, rng=Xoshiro(seeds[i]))
         gndv[i] = gnd(sims, occ)
         sosv[i] = sos(sims)
         _progress!(done, total, "node_analysis")
@@ -92,7 +102,7 @@ function node_analysis(assemblage::Assemblage, tree::AbstractTree; nsims=200)
 end
 
 """
-    node_metrics(assemblage, tree; nsims=200) -> NodeMetrics
+    node_metrics(assemblage, tree; nsims=200, rng=default_rng()) -> NodeMetrics
 
 The divergence of every internal node of `tree`: its per-cell [`sos`](@ref), the
 original [`gnd`](@ref), and the effect-size scores [`sos_rms`](@ref) (`rms`, the
@@ -112,11 +122,15 @@ explored with [`divergent_nodes`](@ref), [`sos_distances`](@ref), `plot_gnd` and
 `plot_node`.
 
 The nodes are analysed in parallel: start Julia with several threads (`julia -t auto`)
-for a near-linear speed-up. The results carry Monte Carlo noise and differ between runs.
+for a near-linear speed-up. The draws come from `rng`: pass e.g. `rng=Xoshiro(1)` for
+results that are reproducible, and the same for any number of threads.
 """
-function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
+function node_metrics(
+    assemblage::Assemblage, tree::AbstractTree; nsims=200, rng::AbstractRNG=default_rng()
+)
     nodevec, analysable, parentsp, descsp = _analysis_prepass(assemblage, tree)
     N = length(nodevec)
+    seeds = _nodeseeds(rng, N)
 
     # parallel heavy pass: only assemblage reads + thread-local randomisers
     gndv = fill(NaN, N)
@@ -132,7 +146,7 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         analysable[i] || continue
         clade = view(assemblage; species=parentsp[i])
         occ = richness(clade) .> 0                        # focal clade's occupied cells
-        sims = _simulate_descendants(clade, descsp[i]; nsims)
+        sims = _simulate_descendants(clade, descsp[i]; nsims, rng=Xoshiro(seeds[i]))
         me, sd = _moments(sims)
         sosv[i] = _sos(sims, me, sd)
         gndv[i] = gnd(sims, occ)
