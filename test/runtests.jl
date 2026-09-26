@@ -1,3 +1,4 @@
+using Aqua
 using Nodiv
 using Phylo
 using Random
@@ -14,4 +15,5 @@ include("toydata.jl")
     include("distances.jl")
     include("recipes.jl")
     include("deprecated.jl")
+    include("aqua.jl")
 end
