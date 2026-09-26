@@ -12,21 +12,19 @@ end
 function NodeMetrics(
     gnd::AbstractDict,
     rms::AbstractDict,
-    spatial::AbstractDict,
+    sd::AbstractDict,
     ses::AbstractDict,
     pval::AbstractDict,
     sos::AbstractDict,
 )
     Base.depwarn(
-        "`NodeMetrics(gnd, rms, spatial, ses, pval, sos)` is deprecated; use " *
-        "`NodeMetrics(nodes, gnd, rms, spatial, ses, pval, varying, sos)`. " *
+        "`NodeMetrics(gnd, rms, sd, ses, pval, sos)` is deprecated; use " *
+        "`NodeMetrics(nodes, gnd, rms, sd, ses, pval, varying, sos)`. " *
         "The share of varying cells is unknown here and set to NaN.",
         :NodeMetrics,
     )
     varying = Dict{String,Float64}(n => NaN for n in keys(sos))
-    return NodeMetrics(
-        sort!(collect(keys(gnd))), gnd, rms, spatial, ses, pval, varying, sos
-    )
+    return NodeMetrics(sort!(collect(keys(gnd))), gnd, rms, sd, ses, pval, varying, sos)
 end
 
 # Renamed metrics

@@ -28,7 +28,7 @@ The results carry Monte Carlo noise and differ slightly between runs.
 - `rms`: **RMS-SOS**, the recommended score (see `sos_rms`).
   The root-mean-square SOS over the cells where the null model varies, in units of null standard deviations: ≈ 1 means no divergence, > 1 means divergence.
   It is an effect size, so it is stable across replication counts and grid resolutions, and it resolves the strongly divergent nodes that GND compresses.
-- `spatial`: the standard deviation of the SOS over the same cells, i.e. RMS-SOS without any uniform offset (see `sos_sd`).
+- `sd`: the standard deviation of the SOS over the same cells, i.e. RMS-SOS without any uniform offset (see `sos_sd`).
 - `ses`: the standardised effect size of the divergence (see `divergence_ses`).
   Useful within one analysis, but its magnitude inflates with clade size, so do **not** compare it across nodes or grains.
 - `pval`: a null-calibrated Monte Carlo significance (see `divergence_pval`).

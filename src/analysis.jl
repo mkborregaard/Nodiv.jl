@@ -96,7 +96,7 @@ end
 
 The divergence of every internal node of `tree`: its per-cell [`sos`](@ref), the
 original [`gnd`](@ref), and the effect-size scores [`sos_rms`](@ref) (`rms`, the
-recommended score), [`sos_sd`](@ref) (`spatial`), [`divergence_ses`](@ref) (`ses`) and
+recommended score), [`sos_sd`](@ref) (`sd`), [`divergence_ses`](@ref) (`ses`) and
 [`divergence_pval`](@ref) (`pval`), all from the same `nsims` draws of the null model.
 `varying` is the share of each node's occupied cells where the null model varies, the
 cells the SOS-based scores rest on; `sqrt(varying) * rms` is the RMS-SOS over all
@@ -121,7 +121,7 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
     # parallel heavy pass: only assemblage reads + thread-local randomisers
     gndv = fill(NaN, N)
     rmsv = fill(NaN, N)
-    spatv = fill(NaN, N)
+    sdv = fill(NaN, N)
     sesv = fill(NaN, N)
     pvalv = fill(NaN, N)
     varyv = fill(NaN, N)
@@ -137,7 +137,7 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         sosv[i] = _sos(sims, me, sd)
         gndv[i] = gnd(sims, occ)
         rmsv[i] = sos_rms(sosv[i])
-        spatv[i] = sos_sd(sosv[i])
+        sdv[i] = sos_sd(sosv[i])
         stat, nullstats = _msos_null(sims, me, sd, occ .& (sd .> 0))
         sesv[i] = _ses(stat, nullstats)
         pvalv[i] = _pval(stat, nullstats)
@@ -148,7 +148,7 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
     # assemble the result dicts (serial)
     gnd_scores = Dict{String,Float64}()
     rms = Dict{String,Float64}()
-    spatial = Dict{String,Float64}()
+    sds = Dict{String,Float64}()
     ses = Dict{String,Float64}()
     pval = Dict{String,Float64}()
     varying = Dict{String,Float64}()
@@ -157,13 +157,13 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         gnd_scores[nodevec[i]] = gndv[i]
         analysable[i] || continue
         rms[nodevec[i]] = rmsv[i]
-        spatial[nodevec[i]] = spatv[i]
+        sds[nodevec[i]] = sdv[i]
         ses[nodevec[i]] = sesv[i]
         pval[nodevec[i]] = pvalv[i]
         varying[nodevec[i]] = varyv[i]
         sos_scores[nodevec[i]] = sosv[i]
     end
-    return NodeMetrics(nodevec, gnd_scores, rms, spatial, ses, pval, varying, sos_scores)
+    return NodeMetrics(nodevec, gnd_scores, rms, sds, ses, pval, varying, sos_scores)
 end
 
 """

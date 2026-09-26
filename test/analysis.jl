@@ -6,7 +6,7 @@
     res = node_metrics(assemblage, tree; nsims=99)
     @test Set(keys(res.gnd)) == Set(internal)
     @test Set(keys(res.sos)) == Set(TOY_ANALYSABLE)
-    for field in (:rms, :spatial, :ses, :pval, :varying)
+    for field in (:rms, :sd, :ses, :pval, :varying)
         @test Set(keys(getfield(res, field))) == Set(TOY_ANALYSABLE)
     end
     @test all(isnan, res.gnd[n] for n in others)
@@ -14,7 +14,7 @@
         @test length(res.sos[n]) == nsites(assemblage)
         @test isnan(res.sos[n][1])  # every species present: the null cannot vary
         @test isnan(res.sos[n][30])  # empty site
-        @test all(isfinite, (res.gnd[n], res.rms[n], res.spatial[n], res.pval[n]))
+        @test all(isfinite, (res.gnd[n], res.rms[n], res.sd[n], res.pval[n]))
     end
     # clades X and Y live on opposite halves of the grid
     @test res.rms["root"] > 1.5
@@ -22,10 +22,10 @@
     @test res.nodes == internal
     @test sprint(show, res) == "NodeMetrics(11 internal nodes, 3 analysed, 30 cells)"
     for n in TOY_ANALYSABLE
-        # rms and spatial summarise the cells where the null varies, so they follow
+        # rms and sd summarise the cells where the null varies, so they follow
         # from the SOS alone
         @test res.rms[n] == sos_rms(res.sos[n])
-        @test res.spatial[n] == sos_sd(res.sos[n])
+        @test res.sd[n] == sos_sd(res.sos[n])
         @test 0 < res.varying[n] < 1  # site 1 is occupied but cannot vary
     end
 
