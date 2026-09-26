@@ -33,14 +33,14 @@ function _sos_distances(
     elseif method === :spearman
         corspearman
     else
-        error("`method` must be :pearson or :spearman")
+        throw(ArgumentError("`method` must be :pearson or :spearman; got $(repr(method))"))
     end
-    overlapweight &&
-        occupied === nothing &&
-        error(
-            "overlapweight = true needs an `occupied` mask (pass `assemblage`/`tree`, " *
-            "or an explicit `occupied` matrix)",
-        )
+    if overlapweight && occupied === nothing
+        msg =
+            "overlapweight = true needs an `occupied` mask: pass `assemblage` and " *
+            "`tree`, or an explicit `occupied` matrix"
+        throw(ArgumentError(msg))
+    end
     n = size(sosmat, 2)
     D = zeros(n, n)
     for i in 1:n, j in (i + 1):n
@@ -82,9 +82,12 @@ function sos_distances(
 )
     occupied = nothing
     if overlapweight
-        (assemblage === nothing || tree === nothing) && error(
-            "overlapweight = true on a `res` needs `assemblage` and `tree` to derive occupancy",
-        )
+        if assemblage === nothing || tree === nothing
+            msg =
+                "overlapweight = true on a `res` needs `assemblage` and `tree` to " *
+                "derive occupancy"
+            throw(ArgumentError(msg))
+        end
         occupied = _occupied_matrix(assemblage, tree, nodes)
     end
     return _sos_distances(

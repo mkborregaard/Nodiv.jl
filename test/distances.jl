@@ -27,13 +27,13 @@
     # Spearman sees a monotone transform as the same pattern
     @test sos_distances([a, exp.(a)]; method=:spearman)[1, 2] ≈ 0 atol = 1e-12
     @test sos_distances([a, exp.(a)])[1, 2] > 0.01
-    @test_throws ErrorException sos_distances([a, b]; method=:kendall)
+    @test_throws ArgumentError sos_distances([a, b]; method=:kendall)
 
     # overlap weighting by the Sorensen index of the occupied cells
     occupied = [trues(50) vcat(trues(25), falses(25))]
     weighted = sos_distances([a, b]; overlapweight=true, occupied)
     @test weighted[1, 2] ≈ 1 - 2 / 3 * abs(cor(a, b))
-    @test_throws ErrorException sos_distances([a, b]; overlapweight=true)
+    @test_throws ArgumentError sos_distances([a, b]; overlapweight=true)
 end
 
 @testset "sos_distances on an analysis result" begin
@@ -45,5 +45,5 @@ end
     weighted = sos_distances(res, nodes; overlapweight=true, assemblage, tree)
     @test size(weighted) == (3, 3)
     @test all(weighted .>= sos_distances(res, nodes) .- 1e-12)
-    @test_throws ErrorException sos_distances(res, nodes; overlapweight=true)
+    @test_throws ArgumentError sos_distances(res, nodes; overlapweight=true)
 end

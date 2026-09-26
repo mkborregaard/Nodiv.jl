@@ -111,12 +111,14 @@ function node_metrics(assemblage::Assemblage, tree::AbstractTree; nsims=200)
         clade = view(assemblage; species=parentsp[i])
         occ = richness(clade) .> 0                        # focal clade's occupied cells
         sims = _simulate_descendants(clade, descsp[i]; nsims)
-        sosv[i] = calculate_SOS(sims)
+        me, sd = _moments(sims)
+        sosv[i] = _sos(sims, me, sd)
         gndv[i] = calculate_GND(sims, occ)
         rmsv[i] = gnd_rms(sosv[i])
         spatv[i] = gnd_spatial(sosv[i])
-        sesv[i] = calculate_GND_ses(sims, occ)
-        pvalv[i] = calculate_GND_pval(sims, occ)
+        stat, nullstats = _msos_null(sims, me, sd, occ .& (sd .> 0))
+        sesv[i] = _ses(stat, nullstats)
+        pvalv[i] = _pval(stat, nullstats)
         varyv[i] = _varying_share(sosv[i], occ)
         n = Threads.atomic_add!(done, 1) + 1
         n % 100 == 0 && @info "node_metrics: $n / $total analysable nodes done"
@@ -178,6 +180,6 @@ function divergent_nodes(res::NodeMetrics; by=:rms, threshold=_default_threshold
     elseif by == :gnd
         return _intreeorder(res, res.gnd, >(threshold))
     else
-        error("`by` must be :rms, :pval or :gnd")
+        throw(ArgumentError("`by` must be :rms, :pval or :gnd; got $(repr(by))"))
     end
 end

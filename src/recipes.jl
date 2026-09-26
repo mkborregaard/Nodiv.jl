@@ -16,10 +16,12 @@
     # the 4th argument - either a `NodeAnalysis`/`NodeMetrics` (looked up by node) or a
     # precomputed SOS vector. Pass the result of `node_metrics`/`node_analysis`; the
     # panel is never recomputed on the fly.
-    length(pn.args) >= 4 || error(
-        "plot_node needs the analysis result (or a precomputed SOS vector) as the " *
-        "4th argument, e.g. plot_node(assemblage, tree, node, res)",
-    )
+    if length(pn.args) < 4
+        msg =
+            "plot_node needs the analysis result (or a precomputed SOS vector) as " *
+            "the 4th argument, e.g. plot_node(assemblage, tree, node, res)"
+        throw(ArgumentError(msg))
+    end
     cached = pn.args[4]
     sos = cached isa AbstractNodeResult ? cached.sos[node] : cached
 

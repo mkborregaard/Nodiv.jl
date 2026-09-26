@@ -24,7 +24,7 @@
         Dict{Symbol,Any}(), Nodiv.Plot_Node((assemblage, tree, "X", res.sos["X"]))
     )
     @test isequal(series[2].args[1], res.sos["X"])
-    @test_throws ErrorException RecipesBase.apply_recipe(
+    @test_throws ArgumentError RecipesBase.apply_recipe(
         Dict{Symbol,Any}(), Nodiv.Plot_Node((assemblage, tree, "root"))
     )
 end
