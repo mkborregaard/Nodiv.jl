@@ -68,12 +68,13 @@ Divergent nodes can be grouped by how alike their SOS maps are, all from the cac
 
 ```julia
 nodes = divergent_nodes(res)
-D = sos_distances(res, nodes; minoverlap=8)          # 1 - |r| between the SOS maps
+D = sos_distances(res, nodes; minoverlap=8)          # sqrt(1 - r^2) between the SOS maps
 o = sos_ordination(D, nodes; maxoutdim=10)           # classical MDS; o.eigenvalues
 clusters = sos_clusters(D, nodes; simcut=0.7)        # complete-linkage clusters
 communities = sos_similarity_communities(D, nodes; simthresh=0.7)
 ```
 
+The distance is `sqrt(1 - r^2)`, the sine of the angle between two SOS maps, which `sos_similarity` turns back into `|r|`; `method=:cosine` compares the maps over the union of their cells instead of the cells they share.
 `sos_clusters` cuts a hierarchical clustering where the similarity `|r|` falls below `simcut`; shown, the result lists the clusters of more than one node, and `sos_cluster_sizes` counts them.
 `sos_similarity_communities` is a check on it: the modularity communities of the graph linking nodes with `|r| >= simthresh`.
 Few groups against a background of nodes on their own is a result, not a failure: the divergent nodes are then largely idiosyncratic in where they diverge.

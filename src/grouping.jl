@@ -31,7 +31,7 @@ end
 
 Hierarchical clustering of `nodes` by the SOS distances `D` (from
 [`sos_distances`](@ref)), cut where the similarity `|r|` falls below `simcut`, i.e. at the
-distance `1 - simcut`.
+distance `sqrt(1 - simcut^2)`.
 
 Complete linkage, the default, is the conservative choice: it puts nodes in a cluster only
 if all pairs in it are similar, and does not chain marginal pairs. Genuine groups, if any,
@@ -43,7 +43,7 @@ function sos_clusters(D::AbstractMatrix{<:Real}, nodes; simcut, linkage=:complet
     nodes = String[n for n in nodes]
     D = Matrix{Float64}(D)
     hc = hclust(D; linkage)
-    cut = cutree(hc; h=1 - simcut)
+    cut = cutree(hc; h=_sos_distance(simcut))
     groups = Dict(node => cut[i] for (i, node) in enumerate(nodes))
     ids = sort(collect(keys(sos_cluster_sizes(groups).members)))
     labels = Dict(c => i for (i, c) in enumerate(ids))
@@ -112,7 +112,8 @@ end
 
 Communities of `nodes` in their thresholded similarity graph, a check on
 [`sos_clusters`](@ref). Two nodes are linked when the similarity `|r|` of their SOS maps
-(`1 - D` for the distances `D` from [`sos_distances`](@ref)) is at least `simthresh`. The
+([`sos_similarity`](@ref) of the distances `D` from [`sos_distances`](@ref)) is at least
+`simthresh`. The
 overlap floor is already in `D`: pairs sharing too few cells, or none, are at distance 1, so
 never linked.
 
@@ -125,8 +126,11 @@ function sos_similarity_communities(D::AbstractMatrix{<:Real}, nodes; simthresh)
     nodes = String[n for n in nodes]
     n = length(nodes)
     linked = falses(n, n)
+    # Compared as distances, as `sos_clusters` cuts, so a pair exactly at `simthresh` is
+    # linked whichever way the round-off goes
+    maxdist = _sos_distance(simthresh)
     for i in 1:n, j in (i + 1):n
-        linked[i, j] = linked[j, i] = (1 - D[i, j]) >= simthresh
+        linked[i, j] = linked[j, i] = D[i, j] <= maxdist
     end
     m = count(linked) ÷ 2
     m == 0 && return SOSCommunities(nodes, simthresh, Vector{String}[], 0.0)
