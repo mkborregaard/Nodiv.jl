@@ -28,7 +28,7 @@ export simulate_descendants
 export divergence_pval, divergence_ses, gnd, sos, sos_rms, sos_sd
 export node_analysis, node_metrics, process_node
 export default_score, divergent_nodes, most_divergent, node_scores
-export sos_distances, sos_ordination, SOSOrdination
+export sos_distances, sos_similarity, sos_ordination, SOSOrdination
 export sos_clusters, sos_cluster_sizes, SOSClusters
 export sos_similarity_communities, SOSCommunities
 export plot_gnd, plot_node

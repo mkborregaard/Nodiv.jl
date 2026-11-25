@@ -1,4 +1,5 @@
 using Aqua
+using LinearAlgebra: I, Symmetric, eigvals
 using Nodiv
 using Phylo
 using Random
